@@ -111,14 +111,16 @@ st.markdown("""
       font-size: 1.24rem;
   }
 
-  /* ② 图表卡片 */
-  div[data-testid="stPlotlyChart"] {
-      border: 1px solid #d8e0ea;
+  /* ② 图表卡片 —— 注意：stPlotlyChart 是 CSS 类名，不是 data-testid！
+        这里同时写两种选择器，兼容不同 Streamlit 版本。 */
+  .stPlotlyChart {
+      box-sizing: border-box;
+      border: 1px solid #a9bed6;          /* 比表格边框更深，形成层级 */
       border-radius: 12px;
       background: #ffffff;
-      padding: 10px 12px 4px 12px;
-      box-shadow: 0 2px 10px rgba(15, 32, 39, .07);
-      margin: 6px 0 22px 0;
+      padding: 12px 14px 6px 14px;
+      box-shadow: 0 3px 14px rgba(15, 32, 39, .10);
+      margin: 8px 0 24px 0;
   }
 
   /* ③ 指标卡 */
@@ -142,13 +144,8 @@ st.markdown("""
       margin: 4px 0 20px 0;
   }
 
-  /* ⑤ 折叠面板卡片 */
-  div[data-testid="stExpander"] details {
-      border: 1px solid #e3e8ef;
-      border-radius: 10px;
-      background: #ffffff;
-      box-shadow: 0 1px 6px rgba(15, 32, 39, .04);
-  }
+  /* ⑤ 折叠面板：Streamlit 1.37 默认已带边框，这里只调间距，
+        避免重复描边产生"双重边框"。 */
   div[data-testid="stExpander"] {
       margin-bottom: 16px;
   }
@@ -157,7 +154,7 @@ st.markdown("""
   .block-container hr {margin: 30px 0 !important; border-color: #dfe6ee;}
 
   /* 相邻两个图表之间再多留一点呼吸空间 */
-  div[data-testid="stPlotlyChart"] + div[data-testid="stPlotlyChart"] {margin-top: 4px;}
+  .stPlotlyChart + .stPlotlyChart {margin-top: 6px;}
 
 </style>
 """, unsafe_allow_html=True)
