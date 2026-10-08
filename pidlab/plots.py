@@ -47,14 +47,15 @@ def _thin(x, *ys, max_pts: int = 3000):
 def _layout(fig, title: str, xlabel: str, ylabel: str, height: int = 460,
             legend_y: float = 1.02):
     fig.update_layout(
-        title=dict(text=title, x=0.01, xanchor="left", font=dict(size=17)),
+        title=dict(text=title, x=0.012, xanchor="left", y=0.97,
+                   font=dict(size=20, color="#102a43", family="Microsoft YaHei, sans-serif")),
         xaxis_title=xlabel, yaxis_title=ylabel, height=height,
-        template="plotly_white",
+        template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)",
         hovermode="x unified",
         legend=dict(orientation="h", yanchor="bottom", y=legend_y, x=0),
-        margin=dict(l=70, r=30, t=80, b=55),
+        margin=dict(l=70, r=32, t=92, b=58),
     )
-    fig.update_xaxes(showspikes=True, spikemode="across", spikethickness=1,
+    fig.update_xaxes(gridcolor="#e8edf3", zerolinecolor="#dfe6ee", showspikes=True, spikemode="across", spikethickness=1,
                      spikecolor="#999", spikedash="dot")
     return fig
 
@@ -108,8 +109,8 @@ def output_control_figure(results: Sequence, title: str = "系统输出与控制
     fig.update_xaxes(title_text="时间 t / s", row=2, col=1)
     fig.update_yaxes(title_text="y(t)", row=1, col=1)
     fig.update_yaxes(title_text="u(t)", row=2, col=1)
-    fig.update_layout(template="plotly_white", height=height, hovermode="x unified",
-                      margin=dict(l=70, r=30, t=70, b=50),
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, hovermode="x unified",
+                      margin=dict(l=70, r=32, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
@@ -124,9 +125,10 @@ def bar_figure(categories: Sequence[str], series: Sequence[dict], title: str = "
                              text=[None if v is None or not np.isfinite(v) else round(float(v), 3)
                                    for v in s["values"]],
                              textposition="outside"))
-    fig.update_layout(barmode="group", template="plotly_white", height=height,
-                      title=dict(text=title, x=0.01, xanchor="left", font=dict(size=17)),
-                      yaxis_title=ylabel, margin=dict(l=70, r=30, t=70, b=50),
+    fig.update_layout(barmode="group", template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height,
+                      title=dict(text=title, x=0.012, xanchor="left", y=0.97,
+                   font=dict(size=20, color="#102a43", family="Microsoft YaHei, sans-serif")),
+                      yaxis_title=ylabel, margin=dict(l=70, r=32, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
@@ -174,7 +176,7 @@ def bode_figure(plant, pid=None, w=None, title: str = "开环频率特性 Bode �
     fig.update_xaxes(type="log", title_text="角频率 w / (rad/s)", row=2, col=1)
     fig.update_yaxes(title_text="幅值 / dB", row=1, col=1)
     fig.update_yaxes(title_text="相位 / 度", row=2, col=1)
-    fig.update_layout(template="plotly_white", height=height, margin=dict(l=70, r=30, t=70, b=50),
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, margin=dict(l=70, r=32, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
@@ -200,8 +202,8 @@ def pole_zero_figure(plant, pid=None, title: str = "闭环极点分布", height:
     fig.add_vline(x=0, line=dict(color="#bbb", width=1))
     fig.update_yaxes(title_text="虚部 jω", scaleanchor="x", scaleratio=1)
     fig.update_xaxes(title_text="实部 σ")
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=70, r=30, t=70, b=50))
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, title=dict(text=title, font=dict(size=19, color="#102a43")),
+                      margin=dict(l=70, r=32, t=86, b=54))
     return fig
 
 
@@ -224,8 +226,8 @@ def nyquist_figure(plant, pid=None, title: str = "Nyquist 图", height: int = 46
     fig.add_vline(x=0, line=dict(color="#ccc", width=1))
     fig.update_xaxes(title_text="实部 Re", scaleanchor="y", scaleratio=1)
     fig.update_yaxes(title_text="虚部 Im")
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=70, r=30, t=70, b=50))
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, title=dict(text=title, font=dict(size=19, color="#102a43")),
+                      margin=dict(l=70, r=32, t=86, b=54))
     return fig
 
 
@@ -247,8 +249,8 @@ def fopdt_figure(fopdt: dict, title: str = "阶跃响应切线法辨识 FOPDT �
                              marker=dict(color=PALETTE[1], size=11)))
     fig.update_xaxes(title_text="时间 t / s")
     fig.update_yaxes(title_text="输出 y(t)")
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=70, r=30, t=70, b=50),
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, title=dict(text=title, font=dict(size=19, color="#102a43")),
+                      margin=dict(l=70, r=32, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
@@ -387,7 +389,7 @@ def bode_margins_figure(plant, pid, margins: dict, title: str = "开环 Bode 图
     fig.update_xaxes(type="log", title_text="角频率 ω / (rad/s)", row=2, col=1)
     fig.update_yaxes(title_text="幅值 / dB", row=1, col=1)
     fig.update_yaxes(title_text="相位 / 度", row=2, col=1)
-    fig.update_layout(template="plotly_white", height=height, margin=dict(l=70, r=40, t=70, b=50),
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, margin=dict(l=70, r=40, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
@@ -414,8 +416,8 @@ def nyquist_annotated_figure(nyq: dict, margins: dict | None = None,
     fig.add_vline(x=0, line=dict(color="#ccc", width=1))
     fig.update_xaxes(title_text="实部 Re", scaleanchor="y", scaleratio=1)
     fig.update_yaxes(title_text="虚部 Im")
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=70, r=30, t=70, b=50),
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, title=dict(text=title, font=dict(size=19, color="#102a43")),
+                      margin=dict(l=70, r=32, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
@@ -450,8 +452,8 @@ def root_locus_figure(rl: dict, title: str = "根轨迹（k = 0 → ∞）", hei
                                          line=dict(width=1.2, color="#333"))))
     fig.update_xaxes(title_text="实部 σ")
     fig.update_yaxes(title_text="虚部 jω", scaleanchor="x", scaleratio=1)
-    fig.update_layout(template="plotly_white", height=height, title=title,
-                      margin=dict(l=70, r=30, t=70, b=50),
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, title=dict(text=title, font=dict(size=19, color="#102a43")),
+                      margin=dict(l=70, r=32, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
@@ -478,7 +480,7 @@ def gain_heatmap_figure(sw, metric: str, title: str = "", x_label: str = "", y_l
             textfont=dict(size=10, color=mk.get("color", "#111111"))))
     fig.update_xaxes(title_text=x_label)
     fig.update_yaxes(title_text=y_label)
-    fig.update_layout(template="plotly_white", height=height, title=title,
+    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, title=dict(text=title, font=dict(size=19, color="#102a43")),
                       margin=dict(l=70, r=40, t=60, b=50),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig

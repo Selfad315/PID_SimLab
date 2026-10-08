@@ -77,6 +77,88 @@ st.markdown("""
   }
   .stTabs [aria-selected="true"] {background:#eef4fb;}
   section[data-testid="stSidebar"] {border-right:1px solid #e3e8ef;}
+
+  /* ================================================================
+     区块化样式体系：
+       ① 区块标题（h3/h4）→ 带底色的标题条
+       ② 图表          → 独立卡片（边框 + 圆角 + 阴影 + 留白）
+       ③ 指标卡        → 卡片化
+       ④ 表格          → 卡片化
+       ⑤ 折叠面板      → 卡片化
+     所有样式都用 data-testid 选择器，升级 Streamlit 版本时不易失效。
+     ================================================================ */
+
+  /* ① 区块标题条 —— 让「这一段讲什么」一眼可见 */
+  .block-container h4 {
+      background: linear-gradient(90deg, #eef4fb 0%, #f6fafd 65%, rgba(255,255,255,0) 100%);
+      border-left: 5px solid #2c5364;
+      border-radius: 7px;
+      padding: 9px 16px 9px 13px;
+      margin-top: 32px !important;
+      margin-bottom: 12px !important;
+      color: #102a43;
+      font-size: 1.12rem;
+      letter-spacing: .2px;
+  }
+  .block-container h3 {
+      background: linear-gradient(90deg, #e4eefb 0%, #f4f9fe 70%, rgba(255,255,255,0) 100%);
+      border-left: 6px solid #1b4f86;
+      border-radius: 8px;
+      padding: 11px 18px 11px 14px;
+      margin-top: 34px !important;
+      margin-bottom: 14px !important;
+      color: #0f3f6e;
+      font-size: 1.24rem;
+  }
+
+  /* ② 图表卡片 */
+  div[data-testid="stPlotlyChart"] {
+      border: 1px solid #d8e0ea;
+      border-radius: 12px;
+      background: #ffffff;
+      padding: 10px 12px 4px 12px;
+      box-shadow: 0 2px 10px rgba(15, 32, 39, .07);
+      margin: 6px 0 22px 0;
+  }
+
+  /* ③ 指标卡 */
+  div[data-testid="stMetric"] {
+      background: #ffffff;
+      border: 1px solid #e3e8ef;
+      border-top: 3px solid #2c5364;
+      border-radius: 10px;
+      padding: 10px 14px 8px 14px;
+      box-shadow: 0 1px 6px rgba(15, 32, 39, .05);
+      margin-bottom: 14px;
+  }
+
+  /* ④ 表格卡片 */
+  div[data-testid="stDataFrame"] {
+      border: 1px solid #e3e8ef;
+      border-radius: 10px;
+      padding: 6px 8px;
+      background: #ffffff;
+      box-shadow: 0 1px 6px rgba(15, 32, 39, .04);
+      margin: 4px 0 20px 0;
+  }
+
+  /* ⑤ 折叠面板卡片 */
+  div[data-testid="stExpander"] details {
+      border: 1px solid #e3e8ef;
+      border-radius: 10px;
+      background: #ffffff;
+      box-shadow: 0 1px 6px rgba(15, 32, 39, .04);
+  }
+  div[data-testid="stExpander"] {
+      margin-bottom: 16px;
+  }
+
+  /* 分隔线（大区块之间） */
+  .block-container hr {margin: 30px 0 !important; border-color: #dfe6ee;}
+
+  /* 相邻两个图表之间再多留一点呼吸空间 */
+  div[data-testid="stPlotlyChart"] + div[data-testid="stPlotlyChart"] {margin-top: 4px;}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -406,6 +488,7 @@ with tab1:
                "或直接输入自定义传递函数；本页输出阶跃响应并自动计算超调量、上升时间、调节时间与稳态误差，"
                "标准二阶对象还会与解析公式逐项对照，验证仿真内核的正确性。")
 
+    st.markdown("#### 关键性能指标")
     c1, c2, c3, c4, c5 = st.columns(5)
     ol = simulate_open_loop(plant, t_end=st.session_state["sim_t_end"], n_samples=st.session_state["sim_n"])
     m_ol = compute_metrics(ol.t, ol.y, ol.r, label="开环阶跃响应")
@@ -420,6 +503,7 @@ with tab1:
     c4.metric("调节时间 ts(2%)", f"{fmt(m_ol['ts_2'], 3)} s", f"包络上界 {theory_val(th, 'ts')} s")
     c5.metric("稳态误差 ess", f"{fmt(m_ol['ess'], 3)}", f"= 1 − y(∞) = {fmt(ess_open, 3)}", delta_color="off")
 
+    st.markdown("#### 阶跃响应与理论对照")
     left, right = st.columns([3, 2])
     with left:
         series = [{"t": ol.t, "y": ol.y, "name": "开环阶跃响应 y(t)", "color": PALETTE[0], "width": 2.6}]
@@ -435,7 +519,7 @@ with tab1:
                                 ylabel="输出 y(t)", ref=y_inf, ref_label="稳态值 y(∞)")
         st.plotly_chart(fig, use_container_width=True)
     with right:
-        st.markdown("**理论公式 vs 仿真结果**")
+        st.markdown("#### 理论公式 vs 仿真结果")
         _rows = ["超调量 σ%", "峰值时间 tp (s)", "上升时间 tr(0→100%) (s)",
                  "调节时间 ts(2%) (s)", "稳态值 y(∞)", "稳态误差 ess"]
         _sim = [fmt(m_ol["overshoot"], 4), fmt(m_ol["tp"], 4), fmt(m_ol["tr_full"], 4),
@@ -465,6 +549,7 @@ with tab1:
             + f"。若把它置于单位负反馈闭环，0 型系统对阶跃输入存在 ess = 1/(1+K) = {fmt(ess_cl, 3)} 的静差，"
               f"这正是后续 PI / PID 引入积分环节能够<b>消除稳态误差</b>的原因。")
 
+    st.markdown("#### 频域特性与极点分布")
     colA, colB = st.columns(2)
     with colA:
         st.plotly_chart(plots.bode_figure(plant, title="对象开环 Bode 图（无控制器）",
@@ -506,6 +591,7 @@ with tab2:
         res_modes[mode] = r
         met_modes[mode] = compute_metrics(r.t, r.y, r.r, label=f"{mode} 控制")
 
+    st.markdown("#### 四种模式性能对比")
     cc1, cc2, cc3, cc4 = st.columns(4)
     best_mode = max(met_modes, key=lambda k: met_modes[k]["score"])
     cc1.metric("超调最小的模式", min(met_modes, key=lambda k: met_modes[k]["overshoot"]),
@@ -516,6 +602,7 @@ with tab2:
                f"ess={fmt(min(abs(m['ess']) for m in met_modes.values()),3)}")
     cc4.metric("综合评分最高", best_mode, f"score={fmt(met_modes[best_mode]['score'],3)}")
 
+    st.markdown("#### 响应曲线与控制量")
     series = [{"t": res_modes[m].t, "y": res_modes[m].y, "name": f"{m} 控制",
                "color": PALETTE[i], "width": 2.4} for i, m in enumerate(MODES)]
     st.plotly_chart(plots.line_figure(series, title="四种 PID 模式阶跃响应对比",
@@ -525,10 +612,11 @@ with tab2:
                                                 title="四种模式的系统输出与控制器输出"),
                     use_container_width=True)
 
-    st.markdown("**性能指标对比表**")
+    st.markdown("#### 性能指标对比表")
     df_modes = metrics_table([met_modes[m] for m in MODES])
     st.dataframe(df_modes, use_container_width=True, hide_index=True)
 
+    st.markdown("#### 指标图形化对比")
     b1, b2 = st.columns(2)
     with b1:
         st.plotly_chart(plots.bar_figure(list(MODES),
@@ -625,7 +713,7 @@ with tab3:
                          use_container_width=True, hide_index=True)
 
     # ---- 整定参数表 ----
-    st.markdown("**① 自动整定得到的 PID 参数**")
+    st.markdown("#### ① 自动整定得到的 PID 参数")
     df_params = pd.DataFrame([r.as_row() for r in tune_results])
     st.dataframe(df_params, use_container_width=True, hide_index=True)
 
@@ -644,7 +732,7 @@ with tab3:
             st.plotly_chart(plots.fopdt_figure(fop), use_container_width=True)
 
     # ---- 整定结果仿真对比 ----
-    st.markdown("**② 整定结果闭环仿真对比（含手动参数对照）**")
+    st.markdown("#### ② 整定结果闭环仿真对比（含手动参数对照）")
     manual_res = sim(tune_mode, kp, ki, kd, label="手动参数（侧边栏）")
     comp_res = [manual_res]
     comp_met = [compute_metrics(manual_res.t, manual_res.y, manual_res.r, label="手动参数（侧边栏）")]
@@ -662,7 +750,7 @@ with tab3:
                                       ref=1.0, ref_label="给定值 r(t)"), use_container_width=True)
     st.plotly_chart(plots.output_control_figure(comp_res, title="整定结果的输出与控制量"), use_container_width=True)
 
-    st.markdown("**③ 整定结果性能指标对比表**")
+    st.markdown("#### ③ 整定结果性能指标对比表")
     st.dataframe(metrics_table(comp_met), use_container_width=True, hide_index=True)
 
     st.plotly_chart(plots.bar_figure(
@@ -671,7 +759,7 @@ with tab3:
         title="不同整定方法的超调量对比", ylabel="σ%"), use_container_width=True)
 
     # ---- 一键应用 ----
-    st.markdown("**④ 选中整定结果并应用到全局参数**")
+    st.markdown("#### ④ 选中整定结果并应用到全局参数")
     apply_cols = st.columns(len(valid_results))
     for i, r in enumerate(valid_results):
         with apply_cols[i % len(apply_cols)]:
@@ -723,7 +811,7 @@ with tab3:
 
     col_a, col_b = st.columns([1, 1.35])
     with col_a:
-        st.markdown("**① 记录当前试探点**")
+        st.markdown("#### ① 记录当前试探点")
         cur_res = sim(tune_mode, kp, ki, kd, label="当前试探点")
         m_cur = compute_metrics(cur_res.t, cur_res.y, cur_res.r, label="当前试探点")
         st.markdown(f"当前参数：`Kp={kp:g}　Ki={ki:g}　Kd={kd:g}`　（用左侧侧边栏实时调整）")
@@ -789,7 +877,7 @@ with tab3:
                     st.rerun()
 
     with col_b:
-        st.markdown("**② 逐步逼近过程曲线**")
+        st.markdown("#### ② 逐步逼近过程曲线")
         if hist:
             series = []
             for i, h in enumerate(hist):
@@ -805,7 +893,7 @@ with tab3:
                     "② 或展开下方的「自动生成试凑过程演示」一键生成 4 步整定轨迹。")
 
     if hist:
-        st.markdown("**③ 试凑过程记录表**")
+        st.markdown("#### ③ 试凑过程记录表")
         df_hist = pd.DataFrame([{k: v for k, v in h.items() if not k.startswith("_")} for h in hist])
         st.dataframe(df_hist, use_container_width=True, hide_index=True)
 
@@ -1070,6 +1158,7 @@ with tab5:
                           "是否消除扰动": "是" if abs(dm["max_dev"]) < 1e-3 else "否"})
 
     pid_base = sim("PID", kp, ki, kd, label="PID（无扰动对照）")
+    st.markdown("#### 抗扰性能指标")
     dc1, dc2, dc3, dc4 = st.columns(4)
     dm_best = min(MODES, key=lambda m: abs(met_dist[m]["dist_max"]))
     dc1.metric("最大动态偏差最小", dm_best, f"{fmt(abs(met_dist[dm_best]['dist_max']),3)}")
@@ -1092,11 +1181,11 @@ with tab5:
                                                 title="抗干扰条件下各控制器的控制量变化"),
                     use_container_width=True)
 
-    st.markdown("**抗干扰性能指标表**")
+    st.markdown("#### 抗干扰性能指标表")
     st.dataframe(pd.DataFrame(dist_rows), use_container_width=True, hide_index=True)
 
     # 抗积分饱和对比
-    st.markdown("**抗积分饱和（Anti-Windup）效果对比**")
+    st.markdown("#### 抗积分饱和（Anti-Windup）效果对比")
     aw1, aw2 = st.columns([1, 3])
     with aw1:
         use_aw_demo = st.checkbox("启用饱和并对比抗饱和", value=False)
@@ -1179,6 +1268,7 @@ with tab6:
     m_lin5 = compute_metrics(lin5.t, lin5.y, lin5.r, label="线性系统")
     m_nl5 = compute_metrics(nl5.t, nl5.y, nl5.r, label="非线性系统")
 
+    st.markdown("#### 线性与非线性对比指标")
     nc1, nc2, nc3, nc4 = st.columns(4)
     nc1.metric("非线性工况", act5.label())
     nc2.metric("超调量 σ%", f"{fmt(m_nl5['overshoot'],3)} %", f"线性 {fmt(m_lin5['overshoot'],3)} %", delta_color="off")
@@ -1194,14 +1284,14 @@ with tab6:
     st.plotly_chart(plots.output_control_figure([lin5, nl5], title="控制量对比（观察限幅/死区/限速的影响"),
                     use_container_width=True)
 
-    st.markdown("**线性 vs 非线性 性能指标对比**")
+    st.markdown("#### 线性 vs 非线性 性能指标对比")
     st.dataframe(metrics_table([m_lin5, m_nl5]), use_container_width=True, hide_index=True)
 
     # 抗饱和开关（仅饱和时有意义）
     if use_sat:
         nl5b = sim(mode5, kp, ki, kd, actuator=act5, anti_windup=not use_aw5, label="抗饱和开关对照")
         m_nl5b = compute_metrics(nl5b.t, nl5b.y, nl5b.r, label="抗饱和开关对照")
-        st.markdown("**饱和工况下 抗积分饱和 on/off 对比**")
+        st.markdown("#### 饱和工况下 抗积分饱和 on/off 对比")
         st.dataframe(metrics_table([m_nl5, m_nl5b]), use_container_width=True, hide_index=True)
 
     # ---- 数学分析：描述函数 ----
@@ -1209,7 +1299,7 @@ with tab6:
     if dA.size:
         ratio = dz / dA
         N_A = 1 - (2 / np.pi) * (np.arcsin(np.clip(ratio, -1, 1)) + ratio * np.sqrt(np.clip(1 - ratio ** 2, 0, None)))
-    st.markdown("**死区非线性的描述函数（信计数学工具）**")
+    st.markdown("#### 死区非线性的描述函数（信计数学工具）")
     fx1, fx2 = st.columns([1, 2])
     with fx1:
         formula_card(
