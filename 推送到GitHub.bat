@@ -12,6 +12,7 @@ if not exist ".git" goto nogit
 
 set "GHUSER="
 set /p "GHUSER=请输入你的 GitHub 用户名（例如 Selfad315）: "
+if not defined GHUSER goto nouser
 if "%GHUSER%"=="" goto nouser
 
 set "REPO=PID_SimLab"
