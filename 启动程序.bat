@@ -6,26 +6,26 @@ set PORT=8501
 set "IPTMP=%TEMP%\_pid_simlab_ip.txt"
 
 echo ============================================================
-echo   PID_SimLab  -  Æô¶¯·ÂÕæÆ½Ì¨£¨µçÄÔ + ÊÖ»ú¾ù¿É·ÃÎÊ£©
+echo   PID_SimLab  -  å¯åŠ¨ä»¿çœŸå¹³å°ï¼ˆç”µè„‘ + æ‰‹æœºå‡å¯è®¿é—®ï¼‰
 echo ============================================================
 echo.
 
-rem ---- ×Ô¶¯Ê¶±ð±¾»ú¾ÖÓòÍø IP ----
+rem ---- è‡ªåŠ¨è¯†åˆ«æœ¬æœºå±€åŸŸç½‘ IP ----
 set "LANIP="
 python -c "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.connect(('10.255.255.255',1));print(s.getsockname()[0]);s.close()" > "%IPTMP%" 2>nul
 if exist "%IPTMP%" set /p LANIP=<"%IPTMP%"
 del "%IPTMP%" >nul 2>nul
 if "%LANIP%"=="" set "LANIP=127.0.0.1"
 
-echo   ±¾»ú·ÃÎÊ : http://localhost:%PORT%
-echo   ÊÖ»ú·ÃÎÊ : http://%LANIP%:%PORT%
+echo   æœ¬æœºè®¿é—® : http://localhost:%PORT%
+echo   æ‰‹æœºè®¿é—® : http://%LANIP%:%PORT%
 echo.
-echo   ÊÖ»úÐèÁ¬½ÓÓëµçÄÔ¡¾Í¬Ò»¸ö Wi-Fi¡¿¡£
-echo   ÈôÊÖ»ú´ò²»¿ª£¬ÇëÓÃ¡¾¹ÜÀíÔ±Éí·Ý¡¿ÔËÐÐÒ»´ÎÏÂÃæÕâÐÐ£¬·ÅÐÐ¶Ë¿Ú£º
+echo   æ‰‹æœºéœ€è¿žæŽ¥ä¸Žç”µè„‘ã€åŒä¸€ä¸ª Wi-Fiã€‘ã€‚
+echo   è‹¥æ‰‹æœºæ‰“ä¸å¼€ï¼Œè¯·ç”¨ã€ç®¡ç†å‘˜èº«ä»½ã€‘è¿è¡Œä¸€æ¬¡ä¸‹é¢è¿™è¡Œï¼Œæ”¾è¡Œç«¯å£ï¼š
 echo     netsh advfirewall firewall add rule name="PID_SimLab 8501" dir=in action=allow protocol=TCP localport=%PORT%
 echo.
 echo ------------------------------------------------------------
-echo   ·þÎñÆô¶¯ºóÇëÎð¹Ø±Õ±¾´°¿Ú£¨¹Øµô¼´Í£Ö¹·þÎñ£©
+echo   æœåŠ¡å¯åŠ¨åŽè¯·å‹¿å…³é—­æœ¬çª—å£ï¼ˆå…³æŽ‰å³åœæ­¢æœåŠ¡ï¼‰
 echo ------------------------------------------------------------
 echo.
 python -m streamlit run app.py --server.headless=true --server.port=%PORT% --server.address=0.0.0.0 --browser.gatherUsageStats=false

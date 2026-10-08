@@ -6,29 +6,29 @@ set PORT=8501
 set "IPTMP=%TEMP%\_pid_simlab_ip.txt"
 
 echo ============================================================
-echo   PID_SimLab  -  Æô¶¯·þÎñ²¢ÓÃ Edge ´ò¿ª
+echo   PID_SimLab  -  å¯åŠ¨æœåŠ¡å¹¶ç”¨ Edge æ‰“å¼€
 echo ============================================================
 echo.
 
-rem ---- ×Ô¶¯Ê¶±ð±¾»ú¾ÖÓòÍø IP ----
+rem ---- è‡ªåŠ¨è¯†åˆ«æœ¬æœºå±€åŸŸç½‘ IP ----
 set "LANIP="
 python -c "import socket;s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM);s.connect(('10.255.255.255',1));print(s.getsockname()[0]);s.close()" > "%IPTMP%" 2>nul
 if exist "%IPTMP%" set /p LANIP=<"%IPTMP%"
 del "%IPTMP%" >nul 2>nul
 if "%LANIP%"=="" set "LANIP=127.0.0.1"
 
-echo [1/3] ¼ì²é·þÎñÊÇ·ñÒÑÔÚÔËÐÐ ...
+echo [1/3] æ£€æŸ¥æœåŠ¡æ˜¯å¦å·²åœ¨è¿è¡Œ ...
 powershell -NoProfile -Command "try{$r=Invoke-WebRequest -Uri 'http://localhost:%PORT%/_stcore/health' -UseBasicParsing -TimeoutSec 3; if($r.StatusCode -eq 200){exit 0}else{exit 1}}catch{exit 1}"
 if errorlevel 1 goto startserver
-echo       ·þÎñÒÑÔÚÔËÐÐ¡£
+echo       æœåŠ¡å·²åœ¨è¿è¡Œã€‚
 goto waitready
 
 :startserver
-echo       Î´ÔËÐÐ£¬ÕýÔÚºóÌ¨Æô¶¯·þÎñ ...
+echo       æœªè¿è¡Œï¼Œæ­£åœ¨åŽå°å¯åŠ¨æœåŠ¡ ...
 start "PID_SimLab Service" /min cmd /c "python -m streamlit run app.py --server.headless=true --server.port=%PORT% --server.address=0.0.0.0 --browser.gatherUsageStats=false"
 
 :waitready
-echo [2/3] µÈ´ý·þÎñ¾ÍÐ÷ ...
+echo [2/3] ç­‰å¾…æœåŠ¡å°±ç»ª ...
 set /a n=0
 :waitloop
 timeout /t 2 /nobreak >nul
@@ -36,29 +36,29 @@ set /a n+=1
 powershell -NoProfile -Command "try{Invoke-WebRequest -Uri 'http://localhost:%PORT%/_stcore/health' -UseBasicParsing -TimeoutSec 3 | Out-Null; exit 0}catch{exit 1}"
 if not errorlevel 1 goto ready
 if %n% lss 25 goto waitloop
-echo       ·þÎñÆô¶¯³¬Ê±¡£ÇëÏÈÈ·ÈÏÒÑ°²×°ÒÀÀµ:
+echo       æœåŠ¡å¯åŠ¨è¶…æ—¶ã€‚è¯·å…ˆç¡®è®¤å·²å®‰è£…ä¾èµ–:
 echo           pip install -r requirements.txt
 pause
 exit /b 1
 
 :ready
-echo       ·þÎñ¾ÍÐ÷
+echo       æœåŠ¡å°±ç»ª
 echo.
-echo [3/3] ÓÃ Edge ´ò¿ª±¾»úÒ³Ãæ ...
+echo [3/3] ç”¨ Edge æ‰“å¼€æœ¬æœºé¡µé¢ ...
 start msedge "http://localhost:%PORT%"
 if errorlevel 1 start "" "http://localhost:%PORT%"
 
 echo.
 echo ============================================================
-echo   ±¾»ú·ÃÎÊ : http://localhost:%PORT%
-echo   ÊÖ»ú·ÃÎÊ : http://%LANIP%:%PORT%
+echo   æœ¬æœºè®¿é—® : http://localhost:%PORT%
+echo   æ‰‹æœºè®¿é—® : http://%LANIP%:%PORT%
 echo ============================================================
 echo.
-echo   ÊÖ»úÐèÁ¬½ÓÓëµçÄÔ¡¾Í¬Ò»¸ö Wi-Fi¡¿¡£
-echo   ÈôÊÖ»ú´ò²»¿ª£¬ÇëÓÃ¡¾¹ÜÀíÔ±Éí·Ý¡¿ÔËÐÐÒ»´ÎÏÂÃæÕâÐÐ£¬·ÅÐÐ¶Ë¿Ú£º
+echo   æ‰‹æœºéœ€è¿žæŽ¥ä¸Žç”µè„‘ã€åŒä¸€ä¸ª Wi-Fiã€‘ã€‚
+echo   è‹¥æ‰‹æœºæ‰“ä¸å¼€ï¼Œè¯·ç”¨ã€ç®¡ç†å‘˜èº«ä»½ã€‘è¿è¡Œä¸€æ¬¡ä¸‹é¢è¿™è¡Œï¼Œæ”¾è¡Œç«¯å£ï¼š
 echo     netsh advfirewall firewall add rule name="PID_SimLab 8501" dir=in action=allow protocol=TCP localport=%PORT%
 echo.
-echo   Í£Ö¹·þÎñ£º¹Ø±Õ±êÌâÎª PID_SimLab Service µÄ×îÐ¡»¯´°¿Ú
+echo   åœæ­¢æœåŠ¡ï¼šå…³é—­æ ‡é¢˜ä¸º PID_SimLab Service çš„æœ€å°åŒ–çª—å£
 echo ------------------------------------------------------------
 timeout /t 25 /nobreak >nul
 endlocal

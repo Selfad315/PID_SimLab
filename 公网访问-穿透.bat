@@ -6,32 +6,32 @@ set PORT=8501
 set CF=%~dp0cloudflared.exe
 
 echo ============================================================
-echo   PID_SimLab  -  ¹«Íø·ÃÎÊ£¨Cloudflare Ãâ·ÑËíµÀ£©
+echo   PID_SimLab  -  å…¬ç½‘è®¿é—®ï¼ˆCloudflare å…è´¹éš§é“ï¼‰
 echo ============================================================
-echo   ±¾·½°¸»á°Ñ±¾µØ·şÎñÓ³Éä³ÉÒ»¸ö https ¹«ÍøµØÖ·£¬
-echo   ÊÖ»úÓÃ 4G/5G »òÈÎÒâ WiFi ¶¼ÄÜ´ò¿ª¡£
+echo   æœ¬æ–¹æ¡ˆä¼šæŠŠæœ¬åœ°æœåŠ¡æ˜ å°„æˆä¸€ä¸ª https å…¬ç½‘åœ°å€ï¼Œ
+echo   æ‰‹æœºç”¨ 4G/5G æˆ–ä»»æ„ WiFi éƒ½èƒ½æ‰“å¼€ã€‚
 echo ============================================================
 echo.
 
 if exist "%CF%" goto havecf
-echo   [1/4] Î´¼ì²âµ½ cloudflared£¬ÕıÔÚÏÂÔØ£¨Ô¼ 30 MB£©...
+echo   [1/4] æœªæ£€æµ‹åˆ° cloudflaredï¼Œæ­£åœ¨ä¸‹è½½ï¼ˆçº¦ 30 MBï¼‰...
 powershell -NoProfile -Command "try{Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile '%CF%' -UseBasicParsing}catch{exit 1}"
 if not exist "%CF%" goto dlfail
-echo         ÏÂÔØÍê³É¡£
+echo         ä¸‹è½½å®Œæˆã€‚
 
 :havecf
-echo   [2/4] ¼ì²é±¾µØ·ÂÕæ·şÎñ ...
+echo   [2/4] æ£€æŸ¥æœ¬åœ°ä»¿çœŸæœåŠ¡ ...
 powershell -NoProfile -Command "try{Invoke-WebRequest -Uri 'http://localhost:%PORT%/_stcore/health' -UseBasicParsing -TimeoutSec 3 | Out-Null; exit 0}catch{exit 1}"
 if errorlevel 1 goto startsrv
-echo         ·şÎñÒÑÔÚÔËĞĞ¡£
+echo         æœåŠ¡å·²åœ¨è¿è¡Œã€‚
 goto waitready
 
 :startsrv
-echo         Î´ÔËĞĞ£¬ÕıÔÚºóÌ¨Æô¶¯ ...
+echo         æœªè¿è¡Œï¼Œæ­£åœ¨åå°å¯åŠ¨ ...
 start "PID_SimLab Service" /min cmd /c "python -m streamlit run app.py --server.headless=true --server.port=%PORT% --server.address=0.0.0.0 --browser.gatherUsageStats=false"
 
 :waitready
-echo   [3/4] µÈ´ı·şÎñ¾ÍĞ÷ ...
+echo   [3/4] ç­‰å¾…æœåŠ¡å°±ç»ª ...
 set /a n=0
 :waitloop
 timeout /t 2 /nobreak >nul
@@ -39,19 +39,19 @@ set /a n+=1
 powershell -NoProfile -Command "try{Invoke-WebRequest -Uri 'http://localhost:%PORT%/_stcore/health' -UseBasicParsing -TimeoutSec 3 | Out-Null; exit 0}catch{exit 1}"
 if not errorlevel 1 goto tunnel
 if %n% lss 25 goto waitloop
-echo         ·şÎñÆô¶¯³¬Ê±£¬ÇëÏÈÈ·ÈÏÒÀÀµÒÑ°²×°: pip install -r requirements.txt
+echo         æœåŠ¡å¯åŠ¨è¶…æ—¶ï¼Œè¯·å…ˆç¡®è®¤ä¾èµ–å·²å®‰è£…: pip install -r requirements.txt
 pause
 exit /b 1
 
 :tunnel
-echo   [4/4] ´´½¨¹«ÍøËíµÀ ...
+echo   [4/4] åˆ›å»ºå…¬ç½‘éš§é“ ...
 echo.
 echo ============================================================
-echo   ÉÔµÈ 5-10 Ãë£¬ÏÂÃæ»á³öÏÖÒ»ĞĞ https://xxxx.trycloudflare.com
-echo   ÄÇ¾ÍÊÇ¹«ÍøµØÖ· ¡ª¡ª ÊÖ»úÓÃÈÎºÎÍøÂç¶¼ÄÜ´ò¿ªËü£¡
+echo   ç¨ç­‰ 5-10 ç§’ï¼Œä¸‹é¢ä¼šå‡ºç°ä¸€è¡Œ https://xxxx.trycloudflare.com
+echo   é‚£å°±æ˜¯å…¬ç½‘åœ°å€ â€”â€” æ‰‹æœºç”¨ä»»ä½•ç½‘ç»œéƒ½èƒ½æ‰“å¼€å®ƒï¼
 echo.
-echo   * Õâ¸ö´°¿Ú²»ÄÜ¹Ø£¬¹Øµô¹«Íø·ÃÎÊÁ¢¼´Ê§Ğ§
-echo   * Ã¿´ÎÔËĞĞÉú³ÉµÄµØÖ·¶¼²»Í¬£¬ÖØĞÂÔËĞĞÇë¿´ĞÂµØÖ·
+echo   * è¿™ä¸ªçª—å£ä¸èƒ½å…³ï¼Œå…³æ‰å…¬ç½‘è®¿é—®ç«‹å³å¤±æ•ˆ
+echo   * æ¯æ¬¡è¿è¡Œç”Ÿæˆçš„åœ°å€éƒ½ä¸åŒï¼Œé‡æ–°è¿è¡Œè¯·çœ‹æ–°åœ°å€
 echo ============================================================
 echo.
 "%CF%" tunnel --url http://localhost:%PORT%
@@ -60,8 +60,8 @@ exit /b 0
 
 :dlfail
 echo.
-echo   !! cloudflared ÏÂÔØÊ§°Ü£¨¿ÉÄÜÊÇÍøÂçÊÜÏŞ£©
-echo   ÇëÊÖ¶¯ÏÂÔØºó·Åµ½±¾ÎÄ¼ş¼Ğ²¢¸ÄÃûÎª cloudflared.exe£º
+echo   !! cloudflared ä¸‹è½½å¤±è´¥ï¼ˆå¯èƒ½æ˜¯ç½‘ç»œå—é™ï¼‰
+echo   è¯·æ‰‹åŠ¨ä¸‹è½½åæ”¾åˆ°æœ¬æ–‡ä»¶å¤¹å¹¶æ”¹åä¸º cloudflared.exeï¼š
 echo   https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe
 echo.
 pause
