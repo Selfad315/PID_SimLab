@@ -1,0 +1,15 @@
+# PID_SimLab 配置
+[theme]
+primaryColor = "#2c5364"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f4f7fa"
+textColor = "#243b53"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
+
+[server]
+# 监听所有网卡：同一局域网内的手机/平板可访问。
+# 注意：这里不写 port，端口交给启动脚本或云平台指定，避免冲突。
+address = "0.0.0.0"
