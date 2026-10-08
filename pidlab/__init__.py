@@ -17,6 +17,8 @@ from .control import (PID, Actuator, SimResult, MODES, MODE_NAMES, AW_MODES, sim
                       sine_disturbance, ramp_disturbance, open_loop_tf, closed_loop_tf)
 from .metrics import (compute_metrics, disturbance_metrics, metrics_table,
                       control_quality)
+from .sweep import (SWEEP_METRICS, AXIS_NAMES, sweep_2d, best_point,
+                    feasible_region, default_ranges)
 from .tuning import (TuningResult, phase_crossover, zn_closed_loop, zn_open_loop,
                      fopdt_from_step, decay_curve, auto_optimize, tune_all,
                      evaluate_tuning, ZN_TABLE, ZN_OPEN_TABLE,

@@ -58,8 +58,22 @@ def compute_metrics(t: np.ndarray, y: np.ndarray, r: Optional[np.ndarray] = None
                     "ts_5": np.nan, "peak": np.nan, "iae": np.nan, "ise": np.nan,
                     "itae": np.nan, "decay_ratio": np.nan, "n_osc": 0,
                     "band_2": np.nan, "band_5": np.nan, "settled": False,
-                    "score": 0.0,               # 不稳定方案评分为 0，供排序比较时使用
+                    "score": 0.0, "responded": True,   # 不稳定方案评分为 0，供排序比较时使用
                     "rise_note": ""})
+        return out
+
+    # ---- 无响应判定 ----
+    # 输出几乎不动时（例如控制器增益全为 0），σ / ts 会算出「0% / 0s」这种
+    # 漂亮但完全错误的结果，必须单独识别并判为无效方案。
+    span_y = float(np.max(y) - np.min(y))
+    if abs(r_ss) > 1e-9 and span_y < 1e-4 * abs(r_ss):
+        out.update({"stable": False, "responded": False, "overshoot": np.nan,
+                    "undershoot": np.nan, "tp": np.nan, "tr": np.nan, "tr_0_100": np.nan,
+                    "tr_full": np.nan, "ts_2": np.nan, "ts_5": np.nan, "peak": float(np.max(y)),
+                    "iae": float(_trapz(np.abs(r - y), t)), "ise": float(_trapz((r - y) ** 2, t)),
+                    "itae": float(_trapz(t * np.abs(r - y), t)), "decay_ratio": np.nan,
+                    "n_osc": 0, "band_2": np.nan, "band_5": np.nan, "settled": False,
+                    "score": 0.0, "rise_note": "系统几乎无响应，性能指标不适用"})
         return out
 
     base = y_ss
@@ -128,6 +142,7 @@ def compute_metrics(t: np.ndarray, y: np.ndarray, r: Optional[np.ndarray] = None
 
     # ---- 综合性能评分（0-100，越大越好；用于自动比较） ----
     out["score"] = _score(out)
+    out["responded"] = True
     out["stable"] = bool(out["settled"] or (np.isfinite(out["ts_5"])))
     out["rise_note"] = ""
     return out

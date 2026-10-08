@@ -17,6 +17,7 @@ import streamlit as st
 from pidlab import (PID, Actuator, SecondOrderPlant, LTIPlant, MODEL_SPECS, build_plant, AW_MODES,
                     MODE_NAMES, MODES,
                     compute_metrics, disturbance_metrics, metrics_table, control_quality,
+                    SWEEP_METRICS, AXIS_NAMES, sweep_2d, best_point, default_ranges,
                     simulate, simulate_open_loop, second_order_theory,
                     pulse_disturbance, sine_disturbance, step_disturbance,
                     ramp_disturbance, tune_all, evaluate_tuning, phase_crossover,
@@ -222,6 +223,20 @@ def formula_card(text: str):
     st.markdown(f'<div class="formula">{text}</div>', unsafe_allow_html=True)
 
 
+@st.cache_data(show_spinner=False, max_entries=24)
+def _sweep_cached(num, den, delay, x_key, y_key, x_vals, y_vals, fixed_items,
+                  mode, t_end, n_samples, act_sig, noise_std, seed):
+    """跨会话缓存的二维参数扫描（网格面积 = 仿真次数，必须缓存）。"""
+    pl = LTIPlant(list(num), list(den), delay=float(delay))
+    actuator = None if act_sig is None else Actuator(
+        enabled=act_sig[0], u_min=act_sig[1], u_max=act_sig[2], dead_zone=act_sig[3],
+        rate_limit=act_sig[4], enabled_dead_zone=act_sig[5], enabled_rate_limit=act_sig[6])
+    return sweep_2d(pl, x_key=str(x_key), y_key=str(y_key),
+                    x_vals=list(x_vals), y_vals=list(y_vals), fixed=dict(fixed_items),
+                    mode=str(mode), t_end=float(t_end), n_samples=int(n_samples),
+                    actuator=actuator, noise_std=float(noise_std), seed=int(seed))
+
+
 @st.cache_data(show_spinner=False, max_entries=48)
 def cached_tune_all(num, den, delay, mode, ratio, include_optimize):
     """跨会话缓存的自动整定结果。
@@ -377,9 +392,9 @@ st.markdown(
     f'<span class="chip">理论超调 <b>{theory_val(th, "overshoot")}%</b></span>'
     '</div>', unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
     "📈 对象建模与响应", "🔀 PID 模式对比", "🎯 PID 参数整定", "🔧 改进型 PID",
-    "⚡ 抗干扰仿真", "🧩 非线性特性", "📐 频域与稳定性", "📊 结果可视化"])
+    "⚡ 抗干扰仿真", "🧩 非线性特性", "📐 频域与稳定性", "🗺 参数扫描", "📊 结果可视化"])
 
 
 # ========================================================================== #
@@ -1314,6 +1329,178 @@ with tab7:
 - **纯滞后是稳定性的最大杀手**：τ 每增大一点，相位就多滞后 ωτ，幅值裕度与相位裕度同时下降。可以把侧边栏的 τ 慢慢调大，观察本页裕度如何恶化直至失稳。
 - **三种判据互相印证**：Bode 图的 GM/PM、Nyquist 的 Z = P − N、根轨迹中极点是否越过虚轴，结论必须一致——本页会自动校验并给出提示。
 """)
+
+# ========================================================================== #
+#  功能页八：参数扫描与性能热力图
+# ========================================================================== #
+with tab9:
+    st.subheader("🗺 参数扫描与性能热力图")
+    st.caption("在 **(Kp, Ki)**、**(Kp, Kd)** 或 **(Ki, Kd)** 平面上网格化扫描，把超调量 / 调节时间 / "
+               "IAE / 综合评分画成热力图 —— 一眼就能看出「参数该往哪调」，并自动定位最优格点。")
+
+    p1, p2, p3 = st.columns([1.1, 1.1, 2.4])
+    plane = p1.selectbox("扫描平面", ["Kp - Ki", "Kp - Kd", "Ki - Kd"], key="sw_plane")
+    grid_lvl = p2.selectbox("网格精度", ["快 (9×9)", "标准 (13×13)", "精细 (17×17)", "很细 (21×21)"],
+                            index=1, key="sw_grid",
+                            help="格点数 = 仿真次数，精度越高越慢（结果会缓存）")
+    n_grid = {"快 (9×9)": 9, "标准 (13×13)": 13,
+              "精细 (17×17)": 17, "很细 (21×21)": 21}[grid_lvl]
+
+    x_key, y_key = {"Kp - Ki": ("kp", "ki"), "Kp - Kd": ("kp", "kd"),
+                    "Ki - Kd": ("ki", "kd")}[plane]
+    fixed_key = ({"kp", "ki", "kd"} - {x_key, y_key}).pop()
+    fixed_val = {"kp": float(kp), "ki": float(ki), "kd": float(kd)}[fixed_key]
+    p3.caption(f"第三个增益固定在侧边栏当前值：**{AXIS_NAMES[fixed_key]} = {fixed_val:g}**"
+               f"　（要改它，直接调左侧侧边栏即可）")
+
+    try:
+        _cr = phase_crossover(plant)
+        ku_now = float(_cr[1]) if _cr else None
+    except Exception:
+        ku_now = None
+    (_xl, _xh), (_yl, _yh) = default_ranges(kp, ki, kd, x_key, y_key, ku=ku_now)
+    if "sw_xmax" not in st.session_state:
+        st.session_state["sw_xmax"] = float(np.clip(_xh, 0.1, 100.0))
+    if "sw_ymax" not in st.session_state:
+        st.session_state["sw_ymax"] = float(np.clip(_yh, 0.1, 100.0))
+    q1, q2, q3 = st.columns(3)
+    x_max = q1.slider(f"{AXIS_NAMES[x_key]} 扫描上限", 0.1, 100.0, step=0.1, key="sw_xmax")
+    y_max = q2.slider(f"{AXIS_NAMES[y_key]} 扫描上限", 0.1, 100.0, step=0.1, key="sw_ymax")
+    sigma_lim = q3.slider("可接受的最大超调 σ_max (%)", 5.0, 100.0, 20.0, 1.0, key="sw_siglim",
+                          help="用于在下方的「约束筛选」里挑出满足超调要求的参数区")
+
+    x_vals = np.linspace(0.0, float(x_max), n_grid)
+    y_vals = np.linspace(0.0, float(y_max), n_grid)
+
+    _sw_key = (plant_key(plant), x_key, y_key, tuple(np.round(x_vals, 6)), tuple(np.round(y_vals, 6)),
+               fixed_key, round(fixed_val, 6), float(st.session_state["sim_t_end"]))
+    if st.session_state.get("_sw_cache_key") != _sw_key:
+        with st.spinner(f"正在扫描 {n_grid}×{n_grid} = {n_grid * n_grid} 个格点（约需数秒，之后会缓存）…"):
+            _t0 = time.time()
+            st.session_state["_sw"] = _sweep_cached(
+                tuple(np.round(np.asarray(plant.num, float), 10)),
+                tuple(np.round(np.asarray(plant.den, float), 10)), float(plant.delay),
+                str(x_key), str(y_key), tuple(np.round(x_vals, 8)), tuple(np.round(y_vals, 8)),
+                tuple(sorted({fixed_key: float(fixed_val)}.items())),
+                "PID", float(st.session_state["sim_t_end"]), 800, None, 0.0, 0)
+            st.session_state["_sw_cache_key"] = _sw_key
+            st.session_state["_sw_time"] = time.time() - _t0
+    sw = st.session_state["_sw"]
+    st.caption(f"网格 {n_grid}×{n_grid}，扫描耗时 {st.session_state.get('_sw_time', 0):.2f} s"
+               f"（结果已缓存，改扫描范围或对象才会重算）")
+
+    # ---- 标注点 ----
+    def _marks_for(metric):
+        mk = [{"name": "当前参数", "x": float({"kp": kp, "ki": ki, "kd": kd}[x_key]),
+               "y": float({"kp": kp, "ki": ki, "kd": kd}[y_key]),
+               "text": " 当前", "symbol": "star", "color": "#ffffff", "size": 15}]
+        for _r in tune_results:
+            if not _r.valid:
+                continue
+            _g = {"kp": float(_r.kp), "ki": float(_r.ki), "kd": float(_r.kd)}
+            if not (x_vals.min() <= _g[x_key] <= x_vals.max() and y_vals.min() <= _g[y_key] <= y_vals.max()):
+                continue
+            mk.append({"name": _r.method, "x": _g[x_key], "y": _g[y_key],
+                       "text": " " + _r.method[:4], "symbol": "x", "color": "#1f77b4", "size": 11})
+        bp = best_point(sw, metric)
+        if bp:
+            mk.append({"name": f"最优（{metric}）", "x": bp["x"], "y": bp["y"],
+                       "text": " 最优", "symbol": "circle-open", "color": "#111111", "size": 15})
+        return mk
+
+    st.markdown("#### 性能指标热力图（绿 = 更好）")
+    h1, h2 = st.columns(2)
+    with h1:
+        _z = sw["Z"]["overshoot"]
+        st.plotly_chart(plots.gain_heatmap_figure(
+            sw, "overshoot", title="超调量 σ (%)", x_label=AXIS_NAMES[x_key],
+            y_label=AXIS_NAMES[y_key], marks=_marks_for("overshoot"),
+            colorscale="RdYlGn_r", z_max=float(np.nanpercentile(_z, 90)) if np.isfinite(_z).any() else None),
+            use_container_width=True)
+    with h2:
+        _z = sw["Z"]["ts_2"]
+        st.plotly_chart(plots.gain_heatmap_figure(
+            sw, "ts_2", title="调节时间 ts(2%) (s)", x_label=AXIS_NAMES[x_key],
+            y_label=AXIS_NAMES[y_key], marks=_marks_for("ts_2"),
+            colorscale="RdYlGn_r", z_max=float(np.nanpercentile(_z, 90)) if np.isfinite(_z).any() else None),
+            use_container_width=True)
+    h3, h4 = st.columns(2)
+    with h3:
+        _z = sw["Z"]["iae"]
+        st.plotly_chart(plots.gain_heatmap_figure(
+            sw, "iae", title="误差积分 IAE", x_label=AXIS_NAMES[x_key],
+            y_label=AXIS_NAMES[y_key], marks=_marks_for("iae"),
+            colorscale="RdYlGn_r", z_max=float(np.nanpercentile(_z, 90)) if np.isfinite(_z).any() else None),
+            use_container_width=True)
+    with h4:
+        st.plotly_chart(plots.gain_heatmap_figure(
+            sw, "score", title="综合评分（越高越好）", x_label=AXIS_NAMES[x_key],
+            y_label=AXIS_NAMES[y_key], marks=_marks_for("score"),
+            colorscale="RdYlGn"), use_container_width=True)
+
+    # ---- 最优点 ----
+    st.markdown("#### 最优格点")
+    _bp = best_point(sw, "score")
+    if _bp:
+        _best_gains = {"kp": float(kp), "ki": float(ki), "kd": float(kd)}
+        _best_gains[x_key] = _bp["x"]
+        _best_gains[y_key] = _bp["y"]
+        b1, b2, b3, b4 = st.columns(4)
+        b1.metric("最优 Kp", f"{_best_gains['kp']:.4f}")
+        b2.metric("最优 Ki", f"{_best_gains['ki']:.4f}")
+        b3.metric("最优 Kd", f"{_best_gains['kd']:.4f}")
+        b4.metric("综合评分", f"{_bp['value']:.2f} 分")
+        _bi = _bp["i"]
+        _bj = _bp["j"]
+        st.caption(f"该点网格实测：σ = {fmt(sw['Z']['overshoot'][_bi, _bj], 3)}%，"
+                   f"ts(2%) = {fmt(sw['Z']['ts_2'][_bi, _bj], 3)} s，"
+                   f"IAE = {fmt(sw['Z']['iae'][_bi, _bj], 4)}"
+                   f"（扫描用的仿真点数较少，实际使用会重新精确仿真）")
+        if st.button("✅ 把最优参数应用到全局 PID", use_container_width=True):
+            st.session_state["_pending_pid"] = (_best_gains["kp"], _best_gains["ki"], _best_gains["kd"])
+            st.rerun()
+
+    # ---- 约束筛选 ----
+    st.markdown("#### 约束筛选：在超调达标的前提下选最快")
+    _ov = sw["Z"]["overshoot"]
+    _ts = sw["Z"]["ts_2"]
+    _ess = np.abs(sw["Z"]["ess_rel"])
+    _t_end_now = float(st.session_state["sim_t_end"])
+    # 有效格点的三条要求：超调达标、真正稳定下来（不是贴着仿真末端）、稳态误差可接受
+    _ok = np.isfinite(_ov) & np.isfinite(_ts) & (_ov <= float(sigma_lim))
+    _ok &= (_ts <= 0.9 * _t_end_now)
+    _ok &= np.isfinite(_ess) & (_ess <= 5.0)
+    if _ok.any():
+        _tss = np.where(_ok, _ts, np.inf)
+        _ii, _jj = np.unravel_index(np.argmin(_tss), _tss.shape)
+        _cg = {"kp": float(kp), "ki": float(ki), "kd": float(kd)}
+        _cg[x_key] = float(x_vals[_jj])
+        _cg[y_key] = float(y_vals[_ii])
+        st.success(f"在 **σ ≤ {sigma_lim:g}%** 的 {int(_ok.sum())} 个格点中，调节时间最短的是："
+                   f"Kp = {_cg['kp']:.4f}，Ki = {_cg['ki']:.4f}，Kd = {_cg['kd']:.4f}　→　"
+                   f"ts(2%) = {fmt(_ts[_ii, _jj], 3)} s，σ = {fmt(_ov[_ii, _jj], 3)}%")
+    else:
+        st.warning(f"当前扫描范围内没有 σ ≤ {sigma_lim:g}% 的格点，请放宽上限或扩大扫描范围。")
+
+    # ---- 结论 ----
+    _bp_ts = best_point(sw, "ts_2")
+    _bp_ov = best_point(sw, "overshoot")
+    _cur_res9 = sim("PID", kp, ki, kd, label="当前参数")
+    _cur_m9 = compute_metrics(_cur_res9.t, _cur_res9.y, _cur_res9.r, label="当前参数")
+    info_card(
+        "<b>自动分析结论</b><br>"
+        f"· <b>超调最小</b>的格点：{AXIS_NAMES[x_key]} = {_bp_ov['x']:.3f}，"
+        f"{AXIS_NAMES[y_key]} = {_bp_ov['y']:.3f}　→　σ = {fmt(_bp_ov['value'], 3)}%"
+        f"（当前参数实测 σ = {fmt(_cur_m9['overshoot'], 3)}%）<br>"
+        f"· <b>调节最快</b>的格点：{AXIS_NAMES[x_key]} = {_bp_ts['x']:.3f}，"
+        f"{AXIS_NAMES[y_key]} = {_bp_ts['y']:.3f}　→　ts = {fmt(_bp_ts['value'], 3)} s<br>"
+        f"· <b>综合评分最高</b>的格点：{AXIS_NAMES[x_key]} = {_bp['x']:.3f}，"
+        f"{AXIS_NAMES[y_key]} = {_bp['y']:.3f}　→　评分 {fmt(_bp['value'], 2)} 分<br>"
+        f"· 热力图能直接看出<b>权衡关系</b>：增大 Kp 通常加快响应但推高超调，"
+        f"增大 Ki 消除静差但延长调节时间，增大 Kd 改善阻尼但放大噪声。"
+        f"绿色区域就是各项指标都较优的「甜区」，可作为实际整定的初值范围。"
+    )
+
 
 # ========================================================================== #
 #  功能页八：仿真结果可视化总览

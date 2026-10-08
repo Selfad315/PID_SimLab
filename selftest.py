@@ -300,6 +300,50 @@ check("量测噪声生效且与真值分离",
       rr.y_meas is not None and not np.allclose(rr.y, rr.y_meas),
       f"y 与 y_meas 最大差 {np.max(np.abs(rr.y - rr.y_meas)):.4f}")
 
+# ---------- 14. 参数扫描与性能热力图 ----------
+print("\n--- 14) 参数扫描与性能热力图 ---")
+from pidlab import sweep_2d, best_point
+
+pl14 = SecondOrderPlant(1.0, 1.0, 0.5, 0.1)
+_t14 = time.time()
+sw14 = sweep_2d(pl14, x_key="kp", y_key="ki",
+                x_vals=np.linspace(0.0, 6.0, 9), y_vals=np.linspace(0.0, 6.0, 9),
+                fixed={"kd": 0.2}, t_end=30.0, n_samples=800)
+print(f"    9×9 网格扫描耗时 {time.time() - _t14:.2f}s")
+check("二维扫描返回完整指标网格",
+      sw14["Z"]["overshoot"].shape == (9, 9) and sw14["Z"]["score"].shape == (9, 9),
+      f"网格形状 {sw14['Z']['overshoot'].shape}")
+
+# 关键回归：零增益点必须判为「无响应」，而不是假优秀（0% / 0s）
+_z_ov = sw14["Z"]["overshoot"][0, 0]
+_z_ts = sw14["Z"]["ts_2"][0, 0]
+check("零增益退化点判为无效（不假报 0s / 0%）",
+      (not np.isfinite(_z_ov)) and (not np.isfinite(_z_ts)),
+      f"Kp=Ki=0 处 σ={_z_ov}, ts={_z_ts}")
+
+_bp14 = best_point(sw14, "score")
+_bp_ov = best_point(sw14, "overshoot")
+_bp_ts = best_point(sw14, "ts_2")
+check("各指标的最优格点定位有效",
+      all((b is not None) and np.isfinite(b["value"]) for b in (_bp14, _bp_ov, _bp_ts)),
+      f"评分最优 Kp={_bp14['x']:.3f}, Ki={_bp14['y']:.3f} → {_bp14['value']:.2f} 分")
+
+_ov14, _ts14 = sw14["Z"]["overshoot"], sw14["Z"]["ts_2"]
+_ess14 = np.abs(sw14["Z"]["ess_rel"])
+_ok14 = (np.isfinite(_ov14) & np.isfinite(_ts14) & (_ov14 <= 20.0)
+         & (_ts14 <= 27.0) & np.isfinite(_ess14) & (_ess14 <= 5.0))
+check("约束筛选能剔除退化/未稳定解",
+      bool(_ok14.any()) and (not _ok14[0, 0]),
+      f"满足 σ≤20% & ts≤27s & |ess|≤5% 的格点数 {int(_ok14.sum())}")
+
+# 网格应同时包含「差区」与「甜区」，热力图才有对比意义
+_scores14 = sw14["Z"]["score"][np.isfinite(sw14["Z"]["score"])]
+_ov_fin14 = _ov14[np.isfinite(_ov14)]
+check("扫描网格同时覆盖差区与甜区（热力图有对比度）",
+      (_scores14.max() - _scores14.min()) > 20.0 and _ov_fin14.min() < 10.0,
+      f"评分跨度 {_scores14.min():.1f}~{_scores14.max():.1f}，"
+      f"网格最小超调 {_ov_fin14.min():.3f}%")
+
 print("\n" + "=" * 78)
 print("自检结果：", "全部通过 [OK]" if ok else "存在失败项 [FAIL]")
 print("=" * 78)

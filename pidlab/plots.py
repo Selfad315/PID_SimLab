@@ -454,3 +454,31 @@ def root_locus_figure(rl: dict, title: str = "根轨迹（k = 0 → ∞）", hei
                       margin=dict(l=70, r=30, t=70, b=50),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
+
+
+def gain_heatmap_figure(sw, metric: str, title: str = "", x_label: str = "", y_label: str = "",
+                        marks=None, colorscale: str = "RdYlGn_r", height: int = 430,
+                        z_max: float | None = None):
+    """增益平面上的性能指标热力图（可标注当前点 / 整定点 / 最优点）。"""
+    z = np.asarray(sw["Z"][metric], dtype=float)
+    zz = np.where(np.isfinite(z), z, np.nan)
+    fig = go.Figure(go.Heatmap(
+        x=np.asarray(sw["x_vals"]), y=np.asarray(sw["y_vals"]), z=zz,
+        colorscale=colorscale, zmax=z_max,
+        colorbar=dict(thickness=12, len=0.85),
+        hovertemplate=(f"{x_label} = %{{x:.3f}}<br>{y_label} = %{{y:.3f}}"
+                       f"<br>{title} = %{{z:.4f}}<extra></extra>")))
+    for mk in (marks or []):
+        fig.add_trace(go.Scatter(
+            x=[mk["x"]], y=[mk["y"]], mode="markers+text", name=mk["name"],
+            text=[mk.get("text", "")], textposition=mk.get("pos", "top center"),
+            marker=dict(symbol=mk.get("symbol", "star"), size=mk.get("size", 13),
+                        color=mk.get("color", "#ffffff"),
+                        line=dict(width=1.5, color="#111111")),
+            textfont=dict(size=10, color=mk.get("color", "#111111"))))
+    fig.update_xaxes(title_text=x_label)
+    fig.update_yaxes(title_text=y_label)
+    fig.update_layout(template="plotly_white", height=height, title=title,
+                      margin=dict(l=70, r=40, t=60, b=50),
+                      legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
+    return fig
