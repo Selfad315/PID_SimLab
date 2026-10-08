@@ -252,6 +252,54 @@ g_bad = fq.margin_grade(fq.stability_margins(
 check("裕度评价能区分稳定/不稳定", g_ok in ("良好", "合格", "临界") and g_bad == "不稳定",
       f"正常参数→{g_ok}，大增益→{g_bad}")
 
+# ---------- 13. 改进型 PID：积分分离 / 不完全微分 / 抗饱和 ----------
+print("\n--- 13) 改进型 PID（积分分离 / 不完全微分 / 抗饱和）---")
+from pidlab import control_quality, Actuator
+
+pl13b = SecondOrderPlant(1.0, 1.0, 0.5, 0.1)
+
+# (a) 积分分离：大阶跃 + 无抗饱和时，应显著压低超调
+res_sep = {}
+for flag in (False, True):
+    pid_s = PID(kp=2, ki=4, kd=0.2, mode="PID",
+                integral_separation=flag, sep_threshold=0.5)
+    rr = simulate(pl13b, pid_s, t_end=40, n_samples=3000, ref=6.0, anti_windup_mode="none")
+    res_sep[flag] = compute_metrics(rr.t, rr.y, rr.r)
+print(f"    大阶跃 ref=6：无分离 峰值={res_sep[False]['peak']:.2f} / σ={res_sep[False]['overshoot']:.1f}%"
+      f"　有分离 峰值={res_sep[True]['peak']:.2f} / σ={res_sep[True]['overshoot']:.1f}%")
+check("积分分离显著降低大阶跃超调",
+      res_sep[True]["peak"] < res_sep[False]["peak"] * 0.5,
+      f"峰值 {res_sep[False]['peak']:.1f} → {res_sep[True]['peak']:.1f}")
+
+# (b) 不完全微分：噪声下应显著降低控制量总变差 TV
+tv = {}
+for flag in (False, True):
+    pid_d = PID(kp=4, ki=2, kd=0.6, mode="PID", derivative_filter=flag, N=10)
+    rr = simulate(pl13b, pid_d, t_end=40, n_samples=3000, noise_std=0.05, seed=1)
+    tv[flag] = control_quality(rr.u, rr.t[1] - rr.t[0])["tv"]
+print(f"    噪声 σ=0.05：完全微分 TV={tv[False]:.0f}　不完全微分 TV={tv[True]:.0f}")
+check("不完全微分显著降低控制量抖动", tv[True] < tv[False] * 0.8,
+      f"TV 降低 {(1 - tv[True] / tv[False]) * 100:.1f}%")
+
+# (c) 三种抗饱和方案都应优于「无抗饱和」
+act13 = Actuator(enabled=True, u_min=-1.0, u_max=1.0)
+ov = {}
+for mkey in ("none", "back", "conditional", "clamping"):
+    pid_a = PID(kp=3, ki=8, kd=0.2, mode="PID")
+    rr = simulate(pl13b, pid_a, t_end=40, n_samples=3000, actuator=act13, anti_windup_mode=mkey)
+    ov[mkey] = compute_metrics(rr.t, rr.y, rr.r)["overshoot"]
+    print(f"    抗饱和 {mkey:<12} σ={ov[mkey]:7.2f}%")
+check("三种抗饱和方案均优于无抗饱和",
+      all(ov[k] < ov["none"] for k in ("back", "conditional", "clamping")),
+      f"无抗饱和 {ov['none']:.1f}% → 反算 {ov['back']:.1f}% / 条件 {ov['conditional']:.1f}% / 限幅 {ov['clamping']:.1f}%")
+
+# (d) 量测噪声确实进入控制器，但指标仍按真值计算
+rr = simulate(pl13b, PID(kp=4, ki=2, kd=0.5, mode="PID"), t_end=10, n_samples=1500,
+              noise_std=0.02, seed=3)
+check("量测噪声生效且与真值分离",
+      rr.y_meas is not None and not np.allclose(rr.y, rr.y_meas),
+      f"y 与 y_meas 最大差 {np.max(np.abs(rr.y - rr.y_meas)):.4f}")
+
 print("\n" + "=" * 78)
 print("自检结果：", "全部通过 [OK]" if ok else "存在失败项 [FAIL]")
 print("=" * 78)

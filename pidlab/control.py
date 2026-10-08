@@ -11,6 +11,14 @@ import pandas as pd
 from .models import SecondOrderPlant, c2d_zoh, poly_add, poly_mul
 
 MODES = ("P", "PI", "PD", "PID")
+
+# 抗积分饱和方案
+AW_MODES = {
+    "none": "无抗饱和",
+    "back": "反算法（back-calculation）",
+    "conditional": "条件积分（conditional integration）",
+    "clamping": "积分限幅（clamping）",
+}
 MODE_NAMES = {"P": "P 纯比例", "PI": "PI 比例积分",
               "PD": "PD 比例微分", "PID": "PID 比例积分微分"}
 
@@ -35,6 +43,11 @@ class PID:
     N: float = 10.0        # 微分滤波系数（越大越接近理想微分）
     name: str = "PID"
 
+    # ---------------- 改进措施 ----------------
+    integral_separation: bool = False   # 积分分离：大偏差时切除积分，抑制超调
+    sep_threshold: float = 0.5          # 积分分离阈值 ε，|e| > ε 时切除积分
+    derivative_filter: bool = True      # True=不完全微分（一阶滤波）；False=完全微分（理想微分）
+
     def gains(self):
         """按工作模式返回实际生效的 (Kp, Ki, Kd)。"""
         m = self.mode.upper()
@@ -55,7 +68,12 @@ class PID:
 
     def describe(self) -> str:
         kp, ki, kd = self.gains()
-        return f"{MODE_NAMES.get(self.mode.upper(), self.mode)}: Kp={kp:g}, Ki={ki:g}, Kd={kd:g}"
+        extra = []
+        if self.integral_separation:
+            extra.append(f"积分分离(ε={self.sep_threshold:g})")
+        extra.append("不完全微分" if self.derivative_filter else "完全微分")
+        return (f"{MODE_NAMES.get(self.mode.upper(), self.mode)}: "
+                f"Kp={kp:g}, Ki={ki:g}, Kd={kd:g}  [{'/'.join(extra)}]")
 
 
 # --------------------------------------------------------------------------- #
@@ -114,13 +132,16 @@ class Actuator:
 #  扰动信号
 # --------------------------------------------------------------------------- #
 def step_disturbance(t0: float, magnitude: float = 0.2) -> Callable:
-    return lambda t: np.where(np.asarray(t) >= t0, magnitude, 0.0) * np.ones_like(np.asarray(t, float))
+    f = lambda t: np.where(np.asarray(t) >= t0, magnitude, 0.0) * np.ones_like(np.asarray(t, float))
+    f.descriptor = ("step", float(t0), float(magnitude))     # 供上层缓存使用
+    return f
 
 
 def pulse_disturbance(t0: float, magnitude: float = 0.5, width: float = 1.0) -> Callable:
     def f(t):
         t = np.asarray(t, float)
         return np.where((t >= t0) & (t < t0 + width), magnitude, 0.0)
+    f.descriptor = ("pulse", float(t0), float(magnitude), float(width))
     return f
 
 
@@ -130,6 +151,7 @@ def sine_disturbance(t0: float, magnitude: float = 0.2, freq: float = 1.0,
         t = np.asarray(t, float)
         s = np.sin(2 * np.pi * freq * (t - t0))
         return np.where((t >= t0) & (t < t0 + duration), magnitude * s, 0.0)
+    f.descriptor = ("sine", float(t0), float(magnitude), float(freq), float(duration))
     return f
 
 
@@ -137,6 +159,7 @@ def ramp_disturbance(t0: float, slope: float = 0.1) -> Callable:
     def f(t):
         t = np.asarray(t, float)
         return np.where(t >= t0, slope * (t - t0), 0.0)
+    f.descriptor = ("ramp", float(t0), float(slope))
     return f
 
 
@@ -161,6 +184,7 @@ class SimResult:
     u_raw: np.ndarray        # 控制器未限幅输出
     dist: np.ndarray         # 扰动信号
     plant_input: np.ndarray  # 真正进入对象的状态输入
+    y_meas: Optional[np.ndarray] = None   # 控制器实际看到的量测值（含噪声）
     pid: Optional[PID] = None
     plant: Optional[SecondOrderPlant] = None
     actuator: Optional[Actuator] = None
@@ -170,6 +194,7 @@ class SimResult:
         df = pd.DataFrame({
             "t": self.t, "r": self.r, "y": self.y, "e": self.e,
             "u": self.u, "u_raw": self.u_raw,
+            "y_meas": self.y_meas if self.y_meas is not None else self.y,
             "dist": self.dist, "plant_input": self.plant_input,
         })
         if prefix:
@@ -184,7 +209,9 @@ def simulate(plant: SecondOrderPlant, pid: PID, t_end: float = 20.0, *,
              dt: Optional[float] = None, n_samples: int = 3000,
              ref: float = 1.0, disturbance: Optional[Callable] = None,
              actuator: Optional[Actuator] = None, anti_windup: bool = True,
+             anti_windup_mode: str = "back",
              derivative_on_measurement: bool = True,
+             noise_std: float = 0.0, seed: int = 0,
              x0: Optional[Sequence[float]] = None,
              label: str = "") -> SimResult:
     """闭环时域仿真。
@@ -224,47 +251,74 @@ def simulate(plant: SecondOrderPlant, pid: PID, t_end: float = 20.0, *,
 
     delay_steps = plant.delay / dt if dt > 0 else 0.0
 
-    # 微分滤波时间常数 Tf = Td/N，Td = Kd/Kp
-    if kd > 0 and kp > 1e-12 and pid.N > 0:
-        Td = kd / kp
-        Tf = Td / pid.N
+    # ---- 微分形式：不完全微分 Tf=Td/N；完全微分 Tf=0（alpha=1，不做滤波）----
+    if pid.derivative_filter and kd > 0 and kp > 1e-12 and pid.N > 0:
+        Tf = (kd / kp) / pid.N
     else:
-        Tf = dt
-    alpha = dt / (Tf + dt)
+        Tf = 0.0
+    alpha = 1.0 if Tf <= 1e-15 else dt / (Tf + dt)
+
+    # ---- 量测噪声：控制器看到的是 y + noise，指标仍按真实 y 计算 ----
+    rng = np.random.default_rng(int(seed))
+    noise = rng.normal(0.0, float(noise_std), t.size) if noise_std > 0 else np.zeros(t.size)
+    y_meas = np.zeros(t.size)
+
+    # ---- 抗积分饱和模式 ----
+    aw = "none" if not anti_windup else str(anti_windup_mode)
+    sep_steps = 0        # 统计积分被切除的步数
 
     for k in range(t.size):
-        # 1) 输出（含直接传递项 D）
+        # 1) 真实输出 + 含噪声的量测值
         yk = float((C @ x).item() + D[0, 0] * p_prev)
         y[k] = yk
-        ek = r[k] - yk
+        yk_m = yk + noise[k]
+        y_meas[k] = yk_m
+        ek = r[k] - yk_m
         e[k] = ek
 
-        # 2) 积分项（后向欧拉）
-        integral += ek * dt
+        # 2) 积分分离：|e| > ε 时切除积分项，同时冻结积分器（避免恢复瞬间突跳）
+        sep = bool(pid.integral_separation) and (abs(ek) > float(pid.sep_threshold))
+        if sep:
+            sep_steps += 1
+        integral_prev = integral
+        if not sep:
+            integral += ek * dt
 
-        # 3) 微分项（带一阶滤波）
+        # 3) 微分项（完全 / 不完全微分）
         if k == 0:
             raw_d = 0.0
         elif derivative_on_measurement:
-            raw_d = -(yk - y_prev) / dt      # 对量测微分，避免给定值跳变的微分冲击
+            raw_d = -(yk_m - y_prev) / dt    # 对量测微分，避免给定值跳变的微分冲击
         else:
             raw_d = (ek - e_prev) / dt
-        d_filt = (1.0 - alpha) * d_filt + alpha * raw_d
+        d_filt = raw_d if alpha >= 1.0 else (1.0 - alpha) * d_filt + alpha * raw_d
 
-        # 4) 控制器输出
-        u_raw = kp * ek + ki * integral + kd * d_filt
+        # 4) 控制器输出（积分分离生效时积分项置零）
+        u_raw = kp * ek + (0.0 if sep else ki * integral) + kd * d_filt
 
         # 5) 执行器非线性（死区 / 速率限幅 / 饱和）
         uk = u_raw if actuator is None else actuator.apply(u_raw, v_prev, dt)
 
-        # 6) 抗积分饱和：反算法(back-calculation)
-        #    只针对"饱和"非线性补偿；死区/速率限幅造成的偏移不参与反算，
-        #    否则积分项会被死区抵消，控制器永远无法越过不灵敏区。
-        u_cmp = u_raw
+        # 6) 抗积分饱和：三种方案都只修正"积分器状态"（供后续步使用），
+        #    本步输出仍取执行器实际输出 uk。
+        u_sat = u_raw
         if actuator is not None and actuator.enabled:
-            u_cmp = float(np.clip(u_raw, actuator.u_min, actuator.u_max))
-        if anti_windup and ki > 1e-12 and abs(u_cmp - u_raw) > 1e-12:
-            integral += (u_cmp - u_raw) / ki
+            u_sat = float(np.clip(u_raw, actuator.u_min, actuator.u_max))
+        sat_diff = u_sat - u_raw
+
+        if ki > 1e-12 and abs(sat_diff) > 1e-12 and not sep:
+            if aw == "back":
+                # 反算法：I ← I + (u_sat − u_raw)/Ki
+                integral += sat_diff / ki
+            elif aw == "conditional":
+                # 条件积分：输出已饱和、且误差仍在把输出往同一方向推时，撤销本步积分累加。
+                #   sat_diff < 0 → 正向饱和（u_raw > u_max），此时 ek > 0 会继续推高积分 → 停积分
+                #   sat_diff > 0 → 反向饱和（u_raw < u_min），此时 ek < 0 会继续压低积分 → 停积分
+                if (sat_diff < 0 and ek > 0) or (sat_diff > 0 and ek < 0):
+                    integral = integral_prev
+            elif aw == "clamping" and actuator is not None:
+                # 积分限幅：把积分贡献限制在执行器量程内
+                integral = float(np.clip(integral, actuator.u_min / ki, actuator.u_max / ki))
 
         u[k] = uk
         u_raw_arr[k] = u_raw
@@ -293,7 +347,7 @@ def simulate(plant: SecondOrderPlant, pid: PID, t_end: float = 20.0, *,
         x = (Ad @ x + (Bd[:, :1] @ np.array([[pk]]))[:, 0])
 
         e_prev = ek
-        y_prev = yk
+        y_prev = yk_m          # 微分对量测微分，须用含噪的量测值
         v_prev = uk
         p_prev = pk
 
@@ -301,8 +355,8 @@ def simulate(plant: SecondOrderPlant, pid: PID, t_end: float = 20.0, *,
     y[-1] = float((C @ x).item() + D[0, 0] * p_prev)
 
     return SimResult(t=t, r=r, y=y, u=u, e=e, u_raw=u_raw_arr, dist=dist,
-                     plant_input=p_in, pid=pid, plant=plant, actuator=actuator,
-                     label=label or pid.describe())
+                     plant_input=p_in, y_meas=y_meas, pid=pid, plant=plant,
+                     actuator=actuator, label=label or pid.describe())
 
 
 def simulate_open_loop(plant: SecondOrderPlant, t_end: float = 20.0, *,

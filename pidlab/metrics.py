@@ -217,3 +217,22 @@ def metrics_table(rows: list) -> "object":
                 rec[title] = v
         data.append(rec)
     return pd.DataFrame(data)
+
+
+# --------------------------------------------------------------------------- #
+#  控制量品质指标（评价微分滤波 / 抗饱和等改进措施）
+# --------------------------------------------------------------------------- #
+def control_quality(u, dt: float | None = None) -> dict:
+    """控制量品质：总变差 TV 衡量抖动/平滑度，另给峰值与有效值。
+
+    TV = Σ|u(k+1) − u(k)| —— 信号越抖，TV 越大；
+    不完全微分的作用正是把被噪声放大的高频抖动压下去，使 TV 显著下降。
+    """
+    u = np.asarray(u, dtype=float)
+    if u.size < 2:
+        return {"tv": np.nan, "tv_rate": np.nan, "u_max": np.nan, "u_rms": np.nan}
+    tv = float(np.sum(np.abs(np.diff(u))))
+    return {"tv": tv,
+            "tv_rate": (tv / float(dt)) if dt else np.nan,
+            "u_max": float(np.max(np.abs(u))),
+            "u_rms": float(np.sqrt(np.mean(u ** 2)))}

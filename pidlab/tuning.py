@@ -296,8 +296,8 @@ DEFAULT_WEIGHTS = {"overshoot": 1.0, "ts": 1.0, "ess": 6.0, "iae": 1.0, "control
 
 def auto_optimize(plant: LTIPlant, mode: str = "PID",
                   weights: Optional[dict] = None, x0: Optional[tuple] = None,
-                  t_end: Optional[float] = None, n_samples: int = 900,
-                  maxiter: int = 140) -> TuningResult:
+                  t_end: Optional[float] = None, n_samples: int = 800,
+                  maxiter: int = 90) -> TuningResult:
     """多目标数值寻优：J = w1·σ% + w2·ts + w3·|ess| + w4·IAE + w5·Σu²。
 
     以对数增益为优化变量保证正定性，采用 Nelder-Mead 单纯形法。

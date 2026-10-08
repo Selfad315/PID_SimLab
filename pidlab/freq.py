@@ -53,7 +53,7 @@ def freq_scale(plant: LTIPlant, pid: PID | None = None) -> float:
     return float(np.min(vals)) if vals else 1.0
 
 
-def freq_grid(plant: LTIPlant, pid: PID | None = None, n: int = 30000, span: float = 6.0):
+def freq_grid(plant: LTIPlant, pid: PID | None = None, n: int = 8000, span: float = 6.0):
     ref = max(freq_scale(plant, pid), 1e-6)
     return np.logspace(np.log10(ref) - span, np.log10(ref) + span, n)
 
@@ -91,7 +91,7 @@ def _first_crossing(w: np.ndarray, f: np.ndarray):
 # --------------------------------------------------------------------------- #
 #  稳定裕度
 # --------------------------------------------------------------------------- #
-def stability_margins(plant: LTIPlant, pid: PID, n: int = 40000) -> dict:
+def stability_margins(plant: LTIPlant, pid: PID, n: int = 8000) -> dict:
     """计算幅值裕度、相位裕度及其穿越频率，并给出稳定判定。"""
     w = freq_grid(plant, pid, n=n)
     L = loop_freqresp(plant, pid, w)
@@ -127,7 +127,7 @@ def stability_margins(plant: LTIPlant, pid: PID, n: int = 40000) -> dict:
 # --------------------------------------------------------------------------- #
 #  Nyquist 判据
 # --------------------------------------------------------------------------- #
-def nyquist_analysis(plant: LTIPlant, pid: PID, n: int = 30000, use_pade: bool = True) -> dict:
+def nyquist_analysis(plant: LTIPlant, pid: PID, n: int = 8000, use_pade: bool = True) -> dict:
     """Nyquist 判据 Z = P - N，并与直接求闭环极点的结果互验。"""
     if use_pade and plant.delay > 1e-12:
         pn, pd = pade1(plant.delay)

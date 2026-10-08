@@ -14,9 +14,9 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from pidlab import (PID, Actuator, SecondOrderPlant, LTIPlant, MODEL_SPECS, build_plant,
+from pidlab import (PID, Actuator, SecondOrderPlant, LTIPlant, MODEL_SPECS, build_plant, AW_MODES,
                     MODE_NAMES, MODES,
-                    compute_metrics, disturbance_metrics, metrics_table,
+                    compute_metrics, disturbance_metrics, metrics_table, control_quality,
                     simulate, simulate_open_loop, second_order_theory,
                     pulse_disturbance, sine_disturbance, step_disturbance,
                     ramp_disturbance, tune_all, evaluate_tuning, phase_crossover,
@@ -85,7 +85,7 @@ st.markdown("""
 # ========================================================================== #
 DEFAULTS = {
     "plant_K": 1.0, "plant_wn": 1.0, "plant_zeta": 0.5, "plant_delay": 0.1,
-    "sim_t_end": 30.0, "sim_n": 3000,
+    "sim_t_end": 30.0, "sim_n": 2000,
     "pid_kp": 2.0, "pid_ki": 1.0, "pid_kd": 0.2, "pid_N": 10.0,
     "tune_mode": "PID", "decay_ratio": 0.25,
 }
@@ -138,15 +138,68 @@ def parse_coeffs(txt: str) -> np.ndarray:
     return arr
 
 
+def _act_signature(act):
+    """把 Actuator 转成可哈希元组，供缓存做键。"""
+    if act is None:
+        return None
+    return (bool(act.enabled), float(act.u_min), float(act.u_max), float(act.dead_zone),
+            float(act.rate_limit), bool(act.enabled_dead_zone), bool(act.enabled_rate_limit))
+
+
+def _rebuild_dist(desc):
+    """按 descriptor 重建扰动信号（缓存的键必须可哈希，不能直接缓存闭包）。"""
+    if not desc:
+        return None
+    kind = desc[0]
+    if kind == "step":
+        return step_disturbance(desc[1], desc[2])
+    if kind == "pulse":
+        return pulse_disturbance(desc[1], desc[2], desc[3])
+    if kind == "sine":
+        return sine_disturbance(desc[1], desc[2], desc[3], duration=desc[4])
+    if kind == "ramp":
+        return ramp_disturbance(desc[1], desc[2])
+    return None
+
+
+@st.cache_data(show_spinner=False, max_entries=512)
+def _sim_cached(num, den, delay, kp, ki, kd, mode, N, t_end, n_samples, ref,
+                act_sig, dist_desc, aw_mode, noise_std, seed, sep, sep_thr, dfilt, label):
+    """按参数缓存的闭环仿真。
+
+    同一组「对象 + PID + 工况」在多个功能页会重复用到（例如 PID 模式阶跃响应
+    在第 2、3、5、8 页都要算一遍），缓存后只计算一次，且跨会话复用。
+    """
+    plant = LTIPlant(list(num), list(den), delay=float(delay))
+    pid = PID(kp=float(kp), ki=float(ki), kd=float(kd), mode=str(mode), N=float(N), name=str(label),
+              integral_separation=bool(sep), sep_threshold=float(sep_thr),
+              derivative_filter=bool(dfilt))
+    actuator = None if act_sig is None else Actuator(
+        enabled=act_sig[0], u_min=act_sig[1], u_max=act_sig[2], dead_zone=act_sig[3],
+        rate_limit=act_sig[4], enabled_dead_zone=act_sig[5], enabled_rate_limit=act_sig[6])
+    return simulate(plant, pid, t_end=float(t_end), n_samples=int(n_samples), ref=float(ref),
+                    disturbance=_rebuild_dist(dist_desc), actuator=actuator,
+                    anti_windup_mode=str(aw_mode), noise_std=float(noise_std),
+                    seed=int(seed), label=str(label))
+
+
 def sim(mode: str, kp: float, ki: float, kd: float, *, plant=None, actuator=None,
         disturbance=None, anti_windup: bool = True, t_end=None, n_samples=None,
-        label=None, derivative_on_measurement=True):
+        label=None, derivative_on_measurement=True, anti_windup_mode: str = "back",
+        noise_std: float = 0.0, seed: int = 0, ref: float = 1.0):
+    """统一的闭环仿真入口（带跨页缓存）。"""
     plant = plant or current_plant()
-    pid = PID(kp=kp, ki=ki, kd=kd, mode=mode, N=st.session_state["pid_N"], name=label or mode)
-    return simulate(plant, pid, t_end=float(t_end or st.session_state["sim_t_end"]),
-                    n_samples=int(n_samples or st.session_state["sim_n"]), actuator=actuator,
-                    disturbance=disturbance, anti_windup=anti_windup, label=label or mode,
-                    derivative_on_measurement=derivative_on_measurement)
+    return _sim_cached(
+        tuple(np.round(np.asarray(plant.num, float), 10)),
+        tuple(np.round(np.asarray(plant.den, float), 10)),
+        float(plant.delay), float(kp), float(ki), float(kd), str(mode),
+        float(st.session_state["pid_N"]),
+        float(t_end or st.session_state["sim_t_end"]),
+        int(n_samples or st.session_state["sim_n"]),
+        float(ref), _act_signature(actuator),
+        getattr(disturbance, "descriptor", None) if disturbance is not None else None,
+        ("none" if not anti_windup else str(anti_windup_mode)),
+        float(noise_std), int(seed), False, 0.5, True, str(label or mode))
 
 
 def fmt(v, nd=4, dash="—"):
@@ -167,6 +220,17 @@ def info_card(html: str):
 
 def formula_card(text: str):
     st.markdown(f'<div class="formula">{text}</div>', unsafe_allow_html=True)
+
+
+@st.cache_data(show_spinner=False, max_entries=48)
+def cached_tune_all(num, den, delay, mode, ratio, include_optimize):
+    """跨会话缓存的自动整定结果。
+
+    同一「对象 + 控制模式 + 衰减比 + 是否寻优」只计算一次，
+    之后所有浏览器会话直接命中缓存（否则每个新访客都要重算约 5 秒）。
+    """
+    pl = LTIPlant(list(num), list(den), delay=float(delay))
+    return tune_all(pl, mode, ratio=float(ratio), include_optimize=bool(include_optimize))
 
 
 # ========================================================================== #
@@ -255,7 +319,7 @@ with st.sidebar:
 
     with st.expander("⚙️ 仿真设置", expanded=True):
         st.number_input("仿真时长 (s)", key="sim_t_end", min_value=1.0, max_value=600.0, step=1.0)
-        st.select_slider("采样点数", key="sim_n", options=[1000, 2000, 3000, 4000, 6000, 8000])
+        st.select_slider("采样点数", key="sim_n", options=[1000, 1500, 2000, 3000, 4000, 6000, 8000])
         st.caption(f"步长 dt ≈ {st.session_state['sim_t_end'] / st.session_state['sim_n'] * 1000:.2f} ms")
 
     with st.expander("🎯 全局 PID 参数", expanded=True):
@@ -313,8 +377,8 @@ st.markdown(
     f'<span class="chip">理论超调 <b>{theory_val(th, "overshoot")}%</b></span>'
     '</div>', unsafe_allow_html=True)
 
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "📈 对象建模与响应", "🔀 PID 模式对比", "🎯 PID 参数整定",
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+    "📈 对象建模与响应", "🔀 PID 模式对比", "🎯 PID 参数整定", "🔧 改进型 PID",
     "⚡ 抗干扰仿真", "🧩 非线性特性", "📐 频域与稳定性", "📊 结果可视化"])
 
 
@@ -512,11 +576,15 @@ with tab3:
     t_end3 = float(st.session_state["sim_t_end"])
     tkey = plant_key(plant) + (tune_mode, float(decay_ratio), include_opt, t_end3)
 
+    if force:
+        cached_tune_all.clear()          # 点「重新整定」时清缓存强制重算
     if force or st.session_state.get("_tune_key") != tkey or "_tune_results" not in st.session_state:
-        with st.spinner("正在执行 ZN 临界比例度法 / ZN 阶跃响应法 / 衰减曲线法 / 数值寻优…"):
+        with st.spinner("正在执行 Z-N 临界比例度法 / Z-N 阶跃响应法 / 衰减曲线法 / 数值寻优…"):
             t0 = time.time()
-            st.session_state["_tune_results"] = tune_all(plant, tune_mode, ratio=float(decay_ratio),
-                                                         include_optimize=include_opt)
+            st.session_state["_tune_results"] = cached_tune_all(
+                tuple(np.round(np.asarray(plant.num, float), 10)),
+                tuple(np.round(np.asarray(plant.den, float), 10)),
+                float(plant.delay), str(tune_mode), float(decay_ratio), bool(include_opt))
             st.session_state["_tune_key"] = tkey
             st.session_state["_tune_time"] = time.time() - t0
     tune_results = st.session_state["_tune_results"]
@@ -745,9 +813,203 @@ with tab3:
 
 
 # ========================================================================== #
-#  功能页四：抗负载干扰仿真
+#  功能页四：改进型 PID 控制器
 # ========================================================================== #
 with tab4:
+    st.subheader("🔧 改进型 PID 控制器")
+    st.caption("在标准 PID 上叠加三项工程改进措施并逐项对比：**积分分离**（抑制积分饱和超调）、"
+               "**不完全微分**（抑制噪声放大）、**抗积分饱和**（反算法 / 条件积分 / 积分限幅）。")
+
+    with st.expander("📐 三项改进的原理与公式", expanded=True):
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            st.markdown("**① 积分分离**")
+            formula_card("u = Kp·e + Kd·ė + β·Ki·∫e dt<br>"
+                         "β = 1，　|e| ≤ ε<br>"
+                         "β = 0，　|e| > ε")
+            st.caption("大偏差时切除积分并冻结积分器（等效纯 PD）→ 避免积分饱和引起的大超调；"
+                       "小偏差时投入积分 → 仍能消除稳态误差。")
+        with g2:
+            st.markdown("**② 不完全微分**")
+            formula_card("完全微分　：ud = Kd·de/dt<br>"
+                         "不完全微分：ud = Kd·[ Td·s / (Td·s + 1) ]·e<br>"
+                         "一阶滤波时间常数　Tf = Td/N")
+            st.caption("理想微分会把高频噪声放大成控制量抖动；串入一阶惯性环节后高频增益被压低，"
+                       "执行器动作明显变平滑。")
+        with g3:
+            st.markdown("**③ 抗积分饱和（三种方案）**")
+            formula_card("反算法　：I ← I + (u_sat − u_raw)/Ki<br>"
+                         "条件积分：饱和且误差同向时停止积分<br>"
+                         "积分限幅：I ∈ [ u_min/Ki , u_max/Ki ]")
+            st.caption("执行器饱和时防止积分器无限累积，避免「退饱和超调」。")
+
+    st.markdown("#### 工况与改进措施设置")
+    q1, q2, q3, q4 = st.columns(4)
+    ref8 = q1.number_input("给定阶跃幅值", min_value=0.1, max_value=20.0, value=1.0, step=0.5,
+                           key="ref8", help="调大到 6 左右，积分分离的效果会非常明显")
+    noise8 = q2.number_input("量测噪声标准差", min_value=0.0, max_value=0.5, value=0.02,
+                             step=0.01, format="%.3f", key="noise8",
+                             help="调大到 0.05，不完全微分抑制抖动的效果会非常明显")
+    use_sat8 = q3.checkbox("启用执行器饱和", value=True, key="sat8")
+    umax8 = q4.number_input("饱和限幅 ±u_max", min_value=0.05, max_value=50.0, value=1.2,
+                            step=0.1, key="umax8", disabled=not use_sat8,
+                            help="要让抗饱和真正起作用，限幅值应【略大于稳态所需控制量】——"
+                                 "即让执行器只在暂态短暂饱和。若限幅小于稳态需求，系统会一直顶在限幅上，"
+                                 "所有方案曲线都会变得一样。")
+
+    r1c, r2c, r3c = st.columns(3)
+    use_sep8 = r1c.checkbox("启用积分分离", value=True, key="sep8")
+    eps8 = r1c.slider("分离阈值 ε", 0.01, 5.0, 0.5, 0.01, key="eps8", disabled=not use_sep8)
+    use_df8 = r2c.checkbox("启用不完全微分", value=True, key="df8")
+    n8 = r2c.slider("微分滤波系数 N", 2.0, 50.0, 10.0, 1.0, key="n8",
+                    disabled=not use_df8, help="N 越大越接近理想微分")
+    aw8 = r3c.selectbox("抗饱和方案", list(AW_MODES.keys()),
+                        format_func=lambda kk: AW_MODES[kk], index=1, key="aw8")
+    r3c.caption("以上三项为「三项全开」时采用的设置")
+
+    act8 = Actuator(enabled=use_sat8, u_min=-float(umax8), u_max=float(umax8)) if use_sat8 else None
+    t_end8 = float(st.session_state["sim_t_end"])
+    n_samp8 = int(st.session_state["sim_n"])
+    dt8 = t_end8 / n_samp8
+
+    def _run8(name, *, sep, df, aw):
+        """按指定改进组合跑一次仿真，并附加控制量品质指标。"""
+        rr = _sim_cached(
+            tuple(np.round(np.asarray(plant.num, float), 10)),
+            tuple(np.round(np.asarray(plant.den, float), 10)), float(plant.delay),
+            float(kp), float(ki), float(kd), "PID", float(n8), t_end8, n_samp8, float(ref8),
+            _act_signature(act8), None, str(aw), float(noise8), 7,
+            bool(sep), float(eps8), bool(df), str(name))
+        mm = compute_metrics(rr.t, rr.y, rr.r, label=name)
+        cq = control_quality(rr.u, dt8)
+        mm["tv"] = cq["tv"]
+        mm["u_max"] = cq["u_max"]
+        return rr, mm
+
+    def _enhanced_table(res_list, met_list):
+        d = report.build_metrics_sheet(res_list, met_list)
+        d["控制量总变差 TV"] = [round(m["tv"], 2) for m in met_list]
+        d["控制量峰值 |u|max"] = [round(m["u_max"], 3) for m in met_list]
+        return d
+
+    st.divider()
+    st.markdown("#### 对比 A：改进措施逐项叠加")
+    variants = [
+        ("① 标准 PID", dict(sep=False, df=False, aw="none")),
+        ("② 仅积分分离", dict(sep=use_sep8, df=False, aw="none")),
+        ("③ 仅不完全微分", dict(sep=False, df=use_df8, aw="none")),
+        ("④ 仅抗饱和", dict(sep=False, df=False, aw=aw8)),
+        ("⑤ 三项全开", dict(sep=use_sep8, df=use_df8, aw=aw8)),
+    ]
+    res8, met8 = [], []
+    for nm8, kw8 in variants:
+        rr8, mm8 = _run8(nm8, **kw8)
+        res8.append(rr8)
+        met8.append(mm8)
+
+    # 饱和占比自检：若长期顶在限幅上，对比会失去意义
+    if use_sat8 and res8:
+        sat_ratio = float(np.mean(np.abs(res8[0].u) >= float(umax8) - 1e-9))
+        if sat_ratio > 0.5:
+            st.warning(
+                f"⚠️ 当前执行器有 **{sat_ratio * 100:.0f}%** 的时间顶在限幅 ±{umax8:g} 上 —— "
+                f"说明限幅值偏小，系统**追不上给定值**，此时各种方案曲线会趋同、失去对比意义。"
+                f"建议把限幅调大到略大于稳态所需控制量（约 {ref8:g} 左右），或把阶跃幅值调小。")
+
+    st.plotly_chart(plots.line_figure(
+        [{"t": rr.t, "y": rr.y, "name": rr.label, "color": PALETTE[i % len(PALETTE)]}
+         for i, rr in enumerate(res8)],
+        title=f"改进措施逐项叠加（阶跃幅值 {ref8:g}，量测噪声 {noise8:g}）",
+        ref=float(ref8), ref_label="给定值 r(t)"), use_container_width=True)
+    st.plotly_chart(plots.output_control_figure(res8, title="各方案的控制量对比（注意抖动幅度）"),
+                    use_container_width=True)
+    st.dataframe(_enhanced_table(res8, met8), use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.markdown("#### 对比 B：三种抗饱和方案")
+    if not use_sat8:
+        st.info("当前未启用执行器饱和 —— 三种抗饱和方案只会在饱和时起作用，勾选上面的「启用执行器饱和」后再看本对比。")
+    aw_list = [("无抗饱和", "none"), ("反算法", "back"),
+               ("条件积分", "conditional"), ("积分限幅", "clamping")]
+    aw_res, aw_met = [], []
+    for nm8, mkey in aw_list:
+        rr8, mm8 = _run8(nm8, sep=False, df=False, aw=mkey)
+        aw_res.append(rr8)
+        aw_met.append(mm8)
+    st.plotly_chart(plots.line_figure(
+        [{"t": rr.t, "y": rr.y, "name": rr.label, "color": PALETTE[i % len(PALETTE)]}
+         for i, rr in enumerate(aw_res)],
+        title=f"抗饱和方案对比（限幅 ±{umax8:g}，仅切换抗饱和方式）",
+        ref=float(ref8), ref_label="给定值 r(t)"), use_container_width=True)
+    st.dataframe(_enhanced_table(aw_res, aw_met), use_container_width=True, hide_index=True)
+
+    st.divider()
+    st.markdown("#### 对比 C：完全微分 vs 不完全微分（含量测噪声）")
+    df_res, df_met = [], []
+    for nm8, use_f in [("完全微分（理想微分）", False), ("不完全微分（一阶滤波）", True)]:
+        rr8, mm8 = _run8(nm8, sep=False, df=use_f, aw="none")
+        df_res.append(rr8)
+        df_met.append(mm8)
+    c_left, c_right = st.columns(2)
+    with c_left:
+        st.plotly_chart(plots.line_figure(
+            [{"t": rr.t, "y": rr.y, "name": rr.label, "color": PALETTE[i]}
+             for i, rr in enumerate(df_res)],
+            title="输出响应（两者跟踪性能接近）", ref=float(ref8), ref_label="给定值"),
+            use_container_width=True)
+    with c_right:
+        st.plotly_chart(plots.line_figure(
+            [{"t": rr.t, "y": rr.u, "name": rr.label, "color": PALETTE[i]}
+             for i, rr in enumerate(df_res)],
+            title="控制量（差异在这里：抖动幅度）", xlabel="时间 t / s", ylabel="控制量 u(t)"),
+            use_container_width=True)
+    tv_a = df_met[0]["tv"]
+    tv_b = df_met[1]["tv"]
+    kd1, kd2, kd3 = st.columns(3)
+    kd1.metric("完全微分 控制量总变差", f"{tv_a:,.1f}")
+    kd2.metric("不完全微分 控制量总变差", f"{tv_b:,.1f}",
+               f"降低 {(1 - tv_b / tv_a) * 100:.1f}%" if tv_a > 0 else None, delta_color="inverse")
+    kd3.metric("控制量峰值降低", f"{(1 - df_met[1]['u_max'] / df_met[0]['u_max']) * 100:.1f} %"
+               if df_met[0]["u_max"] > 0 else "—")
+    st.dataframe(_enhanced_table(df_res, df_met), use_container_width=True, hide_index=True)
+
+    # ---- 自动结论 ----
+    base_m = met8[0]
+    best_m = max(met8[1:], key=lambda m: m["score"]) if len(met8) > 1 else base_m
+    aw_best = min(aw_met, key=lambda m: m["overshoot"] if np.isfinite(m["overshoot"]) else 1e9)
+    info_card(
+        "<b>自动分析结论</b><br>"
+        f"· <b>基准（标准 PID）</b>：超调 σ = {fmt(base_m['overshoot'], 3)}%，"
+        f"调节时间 ts = {fmt(base_m['ts_2'], 3)} s，IAE = {fmt(base_m['iae'], 4)}，"
+        f"控制量总变差 TV = {base_m['tv']:,.1f}。<br>"
+        f"· <b>改进后最佳</b>：<b>{best_m['label']}</b>，σ = {fmt(best_m['overshoot'], 3)}%，"
+        f"ts = {fmt(best_m['ts_2'], 3)} s，IAE = {fmt(best_m['iae'], 4)}，"
+        f"综合评分 {fmt(best_m['score'], 3)}（基准为 {fmt(base_m['score'], 3)}）。<br>"
+        f"· <b>抗饱和方案</b>中，本工况下超调最小的是 <b>{aw_best['label']}</b>"
+        f"（σ = {fmt(aw_best['overshoot'], 3)}%）。三种方案都能显著压低退饱和超调，"
+        f"但通常以调节时间变长为代价 —— 这是「稳定性」与「快速性」的典型折中。<br>"
+        f"· <b>不完全微分</b>的意义不在跟踪指标，而在<b>执行器友好</b>："
+        f"控制量总变差由 {tv_a:,.1f} 降到 {tv_b:,.1f}，说明理想微分把噪声放大成了执行器的高频动作，"
+        f"而一阶滤波把它压了下去 —— 这正是工程上几乎不用纯微分的原因。"
+    )
+
+    with st.expander("📝 答辩要点：这三项改进为什么值得做"):
+        st.markdown("""
+1. **积分分离回答"大偏差时积分反而帮倒忙"**：偏差大时积分器持续累积，一旦执行器饱和就无法及时退出，
+   表现为巨大的退饱和超调甚至振荡。分离后大偏差段等效纯 PD，只在小偏差段用积分收尾。
+2. **不完全微分回答"微分为什么不能直接用"**：理想微分 `Kd·s` 对高频的增益无上限，
+   传感器噪声会被放大几十倍送进执行器。串一阶惯性环节后高频增益被压到有限值。
+3. **抗饱和回答"执行器有物理上限怎么办"**：反算法用 `(u_sat−u_raw)/Ki` 把积分器拉回来；
+   条件积分在饱和时干脆不积分；积分限幅则直接给积分项设上下界。三者都可，工程上反算法最常用。
+4. **可以强调的定量证据**：本文用「控制量总变差 TV」量化了微分形式对执行器的影响，
+   而不只是画曲线定性描述。
+""")
+
+
+# ========================================================================== #
+#  功能页五：抗负载干扰仿真
+# ========================================================================== #
+with tab5:
     st.subheader("⚡ 抗负载干扰仿真")
     st.caption("模拟系统运行中突然加入负载扰动，考察不同控制器的最大动态偏差、恢复时间与扰动后误差积分，"
                "定量评价 PID 的抗干扰能力。")
@@ -873,9 +1135,9 @@ with tab4:
 
 
 # ========================================================================== #
-#  功能页五：执行器非线性特性仿真
+#  功能页六：执行器非线性特性仿真
 # ========================================================================== #
-with tab5:
+with tab6:
     st.subheader("🧩 执行器非线性特性仿真")
     st.caption("在 PID 闭环中叠加死区、饱和与速率限幅三类典型非线性，对比线性与非线性的控制效果，"
                "并用描述函数等数学工具做定量分析。")
@@ -963,7 +1225,7 @@ with tab5:
 
 
 # ========================================================================== #
-#  功能页六：频域分析与稳定性判据
+#  功能页七：频域分析与稳定性判据
 # ========================================================================== #
 with tab7:
     st.subheader("📐 频域分析与稳定性判据")
@@ -1021,8 +1283,8 @@ with tab7:
     _cands = [("手动参数（侧边栏）", PID(kp=kp, ki=ki, kd=kd, mode=tune_mode))]
     _cands += [(r.method, r.to_pid()) for r in tune_results if r.valid]
     for nm7, pid_7 in _cands:
-        mm7 = freq.stability_margins(plant, pid_7, n=12000)
-        nn7 = freq.nyquist_analysis(plant, pid_7, n=12000, use_pade=use_pade)
+        mm7 = freq.stability_margins(plant, pid_7, n=6000)
+        nn7 = freq.nyquist_analysis(plant, pid_7, n=6000, use_pade=use_pade)
         g7, _, _ = freq.margin_grade(mm7)
         rows7.append({
             "方案": nm7,
@@ -1054,9 +1316,9 @@ with tab7:
 """)
 
 # ========================================================================== #
-#  功能页六：仿真结果可视化总览
+#  功能页八：仿真结果可视化总览
 # ========================================================================== #
-with tab6:
+with tab8:
     st.subheader("📊 仿真结果可视化总览")
     st.caption("把前五个功能页的仿真结果集中到一页仪表盘，便于横向对照各控制器与各工况的表现。")
 
@@ -1125,30 +1387,38 @@ with tab6:
     st.caption("数据表保存为 CSV，曲线图保存为 PNG；Excel 多工作表与全部曲线图打包放在下方展开项中按需生成。")
 
     import matplotlib.pyplot as plt
-    dash_fig = plots.mpl_dashboard(
-        [
-            ([{"t": ol6.t, "y": ol6.y, "name": "开环阶跃响应", "color": PALETTE[0]}],
-             "① 阶跃响应（开环）", steady_value(plant6)),
-            ([{"t": res6[m].t, "y": res6[m].y, "name": f"{m} 控制", "color": PALETTE[i]}
-              for i, m in enumerate(MODES)], "② 四种 PID 模式对比", 1.0),
-            ([{"t": res6["PID"].t, "y": res6["PID"].y, "name": "无扰动", "color": "#9aa5b1", "dash": ":"},
-              {"t": dist6.t, "y": dist6.y, "name": "含负载扰动", "color": PALETTE[1]}],
-             "③ 抗干扰响应", 1.0),
-            ([{"t": lin6.t, "y": lin6.y, "name": "线性系统", "color": PALETTE[0]},
-              {"t": nl6.t, "y": nl6.y, "name": f"非线性：{act5.label()}", "color": PALETTE[2]}],
-             "④ 非线性工况对比", 1.0),
-        ],
-        title=f"PID_SimLab 仿真结果总览  |  {plant6.describe()[:56]}")
-    dash_png = report.fig_to_png_bytes(dash_fig)
-    plt.close(dash_fig)
+    _dash_key = plant_key(plant6) + (round(float(kp), 6), round(float(ki), 6), round(float(kd), 6),
+                                     float(st.session_state["sim_t_end"]), int(st.session_state["sim_n"]),
+                                     str(act5.label()))
+    if st.session_state.get("_dash_key") != _dash_key:
+        _dash_fig = plots.mpl_dashboard(
+            [
+                ([{"t": ol6.t, "y": ol6.y, "name": "开环阶跃响应", "color": PALETTE[0]}],
+                 "① 阶跃响应（开环）", steady_value(plant6)),
+                ([{"t": res6[m].t, "y": res6[m].y, "name": f"{m} 控制", "color": PALETTE[i]}
+                  for i, m in enumerate(MODES)], "② 四种 PID 模式对比", 1.0),
+                ([{"t": res6["PID"].t, "y": res6["PID"].y, "name": "无扰动", "color": "#9aa5b1", "dash": ":"},
+                  {"t": dist6.t, "y": dist6.y, "name": "含负载扰动", "color": PALETTE[1]}],
+                 "③ 抗干扰响应", 1.0),
+                ([{"t": lin6.t, "y": lin6.y, "name": "线性系统", "color": PALETTE[0]},
+                  {"t": nl6.t, "y": nl6.y, "name": f"非线性：{act5.label()}", "color": PALETTE[2]}],
+                 "④ 非线性工况对比", 1.0),
+            ],
+            title=f"PID_SimLab 仿真结果总览  |  {plant6.describe()[:56]}")
+        st.session_state["_dash_png"] = report.fig_to_png_bytes(_dash_fig)
+        st.session_state["_csv_sum"] = report.df_to_csv_bytes(df_summary6)
+        st.session_state["_csv_raw"] = report.df_to_csv_bytes(df_raw6)
+        st.session_state["_dash_key"] = _dash_key
+        plt.close(_dash_fig)
+    dash_png = st.session_state["_dash_png"]
 
     sv1, sv2, sv3 = st.columns(3)
     with sv1:
-        st.download_button("⬇️ 性能指标表（CSV）", data=report.df_to_csv_bytes(df_summary6),
+        st.download_button("⬇️ 性能指标表（CSV）", data=st.session_state["_csv_sum"],
                            file_name=f"性能指标表_{datetime.now():%Y%m%d_%H%M}.csv",
                            mime="text/csv", use_container_width=True)
     with sv2:
-        st.download_button("⬇️ 全部时间序列（CSV）", data=report.df_to_csv_bytes(df_raw6),
+        st.download_button("⬇️ 全部时间序列（CSV）", data=st.session_state["_csv_raw"],
                            file_name=f"时间序列数据_{datetime.now():%Y%m%d_%H%M}.csv",
                            mime="text/csv", use_container_width=True)
     with sv3:
@@ -1223,3 +1493,4 @@ with tab6:
     st.divider()
     st.caption("PID_SimLab v0.1 · Python + Streamlit + NumPy + SciPy + Plotly ｜ "
                "仿真内核：可控标准型状态空间 + 零阶保持精确离散化 + 历史缓冲纯滞后")
+

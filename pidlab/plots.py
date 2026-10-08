@@ -31,6 +31,16 @@ PALETTE = ["#1f77b4", "#d62728", "#2ca02c", "#ff7f0e",
 _MARKERS = ["circle", "square", "triangle-up", "diamond", "cross", "star", "pentagon"]
 
 
+def _thin(x, *ys, max_pts: int = 3000):
+    """等间隔抽稀，减小 Plotly 构图的点数开销（曲线形状不变）。"""
+    x = np.asarray(x)
+    n = x.size
+    if n <= max_pts:
+        return (x,) + tuple(np.asarray(y) for y in ys)
+    idx = np.unique(np.linspace(0, n - 1, int(max_pts)).astype(int))
+    return (x[idx],) + tuple(np.asarray(y)[idx] for y in ys)
+
+
 # ========================================================================== #
 #  Plotly：交互曲线
 # ========================================================================== #
@@ -62,8 +72,9 @@ def line_figure(series: Sequence[dict], title: str = "", xlabel: str = "时间 t
         fig.add_hline(y=ref, line=dict(color="#444", dash="dash", width=1.4),
                       annotation_text=ref_label, annotation_position="top left")
     for i, s in enumerate(series):
+        _tx, _ty = _thin(np.asarray(s["t"]), np.asarray(s["y"]), max_pts=1200)
         fig.add_trace(go.Scatter(
-            x=np.asarray(s["t"]), y=np.asarray(s["y"]), mode="lines",
+            x=_tx, y=_ty, mode="lines",
             name=s.get("name", f"曲线 {i+1}"),
             line=dict(color=s.get("color", PALETTE[i % len(PALETTE)]),
                       dash=s.get("dash", "solid"), width=s.get("width", 2.2)),
@@ -82,14 +93,17 @@ def output_control_figure(results: Sequence, title: str = "系统输出与控制
     fig.add_hline(y=ref, line=dict(color="#444", dash="dash", width=1.3), row=1, col=1)
     for i, r in enumerate(results):
         c = PALETTE[i % len(PALETTE)]
-        fig.add_trace(go.Scatter(x=r.t, y=r.y, name=r.label or f"方案{i+1}",
+        _tx, _ty = _thin(np.asarray(r.t), np.asarray(r.y), max_pts=1200)
+        fig.add_trace(go.Scatter(x=_tx, y=_ty, name=r.label or f"方案{i+1}",
                                  line=dict(color=c, width=2.3)), row=1, col=1)
     for i, r in enumerate(results):
         c = PALETTE[i % len(PALETTE)]
-        fig.add_trace(go.Scatter(x=r.t, y=r.u, name=r.label or f"方案{i+1}",
+        _tx2, _tu = _thin(np.asarray(r.t), np.asarray(r.u), max_pts=1200)
+        fig.add_trace(go.Scatter(x=_tx2, y=_tu, name=r.label or f"方案{i+1}",
                                  line=dict(color=c, width=1.7, dash="dot"),
                                  showlegend=False, opacity=0.85), row=2, col=1)
-        fig.add_trace(go.Scatter(x=r.t, y=r.u_raw, name="未限幅", visible="legendonly",
+        _tx3, _tur = _thin(np.asarray(r.t), np.asarray(r.u_raw), max_pts=1200)
+        fig.add_trace(go.Scatter(x=_tx3, y=_tur, name="未限幅", visible="legendonly",
                                  line=dict(color=c, width=1, dash="dash")), row=2, col=1)
     fig.update_xaxes(title_text="时间 t / s", row=2, col=1)
     fig.update_yaxes(title_text="y(t)", row=1, col=1)
@@ -321,15 +335,18 @@ def mpl_dashboard(panels, title: str = "", figsize=(13.2, 8.2), dpi: int = 150):
     return fig
 
 
+
 # ========================================================================== #
 #  频域与稳定性分析专用图
 # ========================================================================== #
 def bode_margins_figure(plant, pid, margins: dict, title: str = "开环 Bode 图与稳定裕度",
                         height: int = 660):
     """带幅值/相位裕度标注的 Bode 图。"""
-    w = np.asarray(margins["w"])
-    mag_db = np.asarray(margins["mag_db"])
-    phase = np.asarray(margins["phase_deg"])
+    w, mag_db, phase = _thin(np.asarray(margins["w"]),
+                             np.asarray(margins["mag_db"]),
+                             np.asarray(margins["phase_deg"]), max_pts=3000)
+    mag_db = np.asarray(mag_db)
+    phase = np.asarray(phase)
     w_gc, w_pc = margins.get("w_gc"), margins.get("w_pc")
     pm, gm_db = margins.get("pm"), margins.get("gm_db")
 
@@ -379,6 +396,8 @@ def nyquist_annotated_figure(nyq: dict, margins: dict | None = None,
                              title: str = "Nyquist 图与临界点", height: int = 520):
     """Nyquist 图（正频段 + 镜像），标注 (-1, j0) 与绕数结论。"""
     L = np.asarray(nyq["L"])
+    if L.size > 4000:
+        L = L[np.unique(np.linspace(0, L.size - 1, 4000).astype(int))]
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=L.real, y=L.imag, mode="lines", name="L(jω)，ω: 0 → +∞",
                              line=dict(color=PALETTE[0], width=2.4)))

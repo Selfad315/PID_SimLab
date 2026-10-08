@@ -12,10 +12,11 @@ report  : Excel / CSV / PNG / Markdown 实验报告导出
 """
 from .models import (LTIPlant, SecondOrderPlant, MODEL_SPECS, build_plant,
                      second_order_theory, tf_to_ss, c2d_zoh, freqresp, poly_add, poly_mul)
-from .control import (PID, Actuator, SimResult, MODES, MODE_NAMES, simulate,
+from .control import (PID, Actuator, SimResult, MODES, MODE_NAMES, AW_MODES, simulate,
                       simulate_open_loop, step_disturbance, pulse_disturbance,
                       sine_disturbance, ramp_disturbance, open_loop_tf, closed_loop_tf)
-from .metrics import compute_metrics, disturbance_metrics, metrics_table
+from .metrics import (compute_metrics, disturbance_metrics, metrics_table,
+                      control_quality)
 from .tuning import (TuningResult, phase_crossover, zn_closed_loop, zn_open_loop,
                      fopdt_from_step, decay_curve, auto_optimize, tune_all,
                      evaluate_tuning, ZN_TABLE, ZN_OPEN_TABLE,
