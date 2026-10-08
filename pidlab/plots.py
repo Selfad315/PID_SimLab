@@ -109,7 +109,7 @@ def output_control_figure(results: Sequence, title: str = "系统输出与控制
     fig.update_xaxes(title_text="时间 t / s", row=2, col=1)
     fig.update_yaxes(title_text="y(t)", row=1, col=1)
     fig.update_yaxes(title_text="u(t)", row=2, col=1)
-    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, hovermode="x unified",
+    fig.update_layout(title=dict(text=title, font=dict(size=20, color="#102a43")), template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, hovermode="x unified",
                       margin=dict(l=70, r=32, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
@@ -176,7 +176,7 @@ def bode_figure(plant, pid=None, w=None, title: str = "开环频率特性 Bode �
     fig.update_xaxes(type="log", title_text="角频率 w / (rad/s)", row=2, col=1)
     fig.update_yaxes(title_text="幅值 / dB", row=1, col=1)
     fig.update_yaxes(title_text="相位 / 度", row=2, col=1)
-    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, margin=dict(l=70, r=32, t=86, b=54),
+    fig.update_layout(title=dict(text=title, font=dict(size=20, color="#102a43")), template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, margin=dict(l=70, r=32, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
@@ -389,7 +389,7 @@ def bode_margins_figure(plant, pid, margins: dict, title: str = "开环 Bode 图
     fig.update_xaxes(type="log", title_text="角频率 ω / (rad/s)", row=2, col=1)
     fig.update_yaxes(title_text="幅值 / dB", row=1, col=1)
     fig.update_yaxes(title_text="相位 / 度", row=2, col=1)
-    fig.update_layout(template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, margin=dict(l=70, r=40, t=86, b=54),
+    fig.update_layout(title=dict(text=title, font=dict(size=20, color="#102a43")), template="plotly_white", plot_bgcolor="#fbfcfe", paper_bgcolor="rgba(0,0,0,0)", height=height, margin=dict(l=70, r=40, t=86, b=54),
                       legend=dict(orientation="h", yanchor="bottom", y=1.02, x=0))
     return fig
 
