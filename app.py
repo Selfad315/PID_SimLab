@@ -165,7 +165,7 @@ st.markdown("""
 # ========================================================================== #
 DEFAULTS = {
     "plant_K": 1.0, "plant_wn": 1.0, "plant_zeta": 0.5, "plant_delay": 0.1,
-    "sim_t_end": 30.0, "sim_n": 2000,
+    "sim_t_end": 30.0, "sim_n": 1500,
     "pid_kp": 2.0, "pid_ki": 1.0, "pid_kd": 0.2, "pid_N": 10.0,
     "tune_mode": "PID", "decay_ratio": 0.25,
 }
@@ -1427,11 +1427,11 @@ with tab9:
 
     p1, p2, p3 = st.columns([1.1, 1.1, 2.4])
     plane = p1.selectbox("扫描平面", ["Kp - Ki", "Kp - Kd", "Ki - Kd"], key="sw_plane")
-    grid_lvl = p2.selectbox("网格精度", ["快 (9×9)", "标准 (13×13)", "精细 (17×17)", "很细 (21×21)"],
+    grid_lvl = p2.selectbox("网格精度", ["快 (9×9)", "标准 (11×11)", "精细 (15×15)", "很细 (21×21)"],
                             index=1, key="sw_grid",
                             help="格点数 = 仿真次数，精度越高越慢（结果会缓存）")
-    n_grid = {"快 (9×9)": 9, "标准 (13×13)": 13,
-              "精细 (17×17)": 17, "很细 (21×21)": 21}[grid_lvl]
+    n_grid = {"快 (9×9)": 9, "标准 (11×11)": 11,
+              "精细 (15×15)": 15, "很细 (21×21)": 21}[grid_lvl]
 
     x_key, y_key = {"Kp - Ki": ("kp", "ki"), "Kp - Kd": ("kp", "kd"),
                     "Ki - Kd": ("ki", "kd")}[plane]
@@ -1469,7 +1469,7 @@ with tab9:
                 tuple(np.round(np.asarray(plant.den, float), 10)), float(plant.delay),
                 str(x_key), str(y_key), tuple(np.round(x_vals, 8)), tuple(np.round(y_vals, 8)),
                 tuple(sorted({fixed_key: float(fixed_val)}.items())),
-                "PID", float(st.session_state["sim_t_end"]), 800, None, 0.0, 0)
+                "PID", float(st.session_state["sim_t_end"]), 600, None, 0.0, 0)
             st.session_state["_sw_cache_key"] = _sw_key
             st.session_state["_sw_time"] = time.time() - _t0
     sw = st.session_state["_sw"]
