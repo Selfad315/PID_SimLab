@@ -164,16 +164,10 @@ st.markdown("""
 #  会话状态默认值（写在所有 widget 之前，便于"一键应用参数"）
 # ========================================================================== #
 DEFAULTS = {
-    "plant_K": 1.0, "plant_wn": 1.0, "plant_zeta": 0.5, "plant_delay": 0.1,
-    "sim_t_end": 30.0, "sim_n": 1500,
-    "pid_kp": 2.0, "pid_ki": 1.0, "pid_kd": 0.2, "pid_N": 10.0,
+    # 这三个是「已应用」的仿真设置，由侧边栏的「▶ 开始运行」写入，各功能页直接读取
+    "sim_t_end": 30.0, "sim_n": 1500, "pid_N": 10.0,
     "tune_mode": "PID", "decay_ratio": 0.25,
 }
-
-# 待应用的整定参数（由「PID 参数整定」页的按钮写入，下一轮 rerun 在 widget 创建前生效）
-if "_pending_pid" in st.session_state:
-    _kp, _ki, _kd = st.session_state.pop("_pending_pid")
-    st.session_state["pid_kp"], st.session_state["pid_ki"], st.session_state["pid_kd"] = _kp, _ki, _kd
 
 for _k, _v in DEFAULTS.items():
     if _k not in st.session_state:
@@ -344,16 +338,60 @@ PRESETS = {
 
 
 def apply_preset(name: str):
-    """把预置对象写入会话状态（须早于对应 widget 创建）。"""
+    """把预置对象写入「草稿」控件（须早于对应 widget 创建）。"""
     item = PRESETS.get(name)
     if not item:
         return
     model_title, params, dly = item
     spec = MODEL_SPECS[model_title]
-    st.session_state["model_key"] = model_title
+    st.session_state["model_key_in"] = model_title
     for pk, val in params.items():
-        st.session_state[f"mp_{spec['kind']}_{pk}"] = val
-    st.session_state["plant_delay"] = dly
+        st.session_state[f"mp_{spec['kind']}_{pk}_in"] = val
+    st.session_state["plant_delay_in"] = dly
+
+
+# 草稿控件的默认值（键带 _in 后缀，与「已应用」值分开存放）
+_DRAFT_DEFAULTS = {
+    "model_key_in": list(MODEL_SPECS.keys())[0],
+    "plant_delay_in": 0.1,
+    "sim_t_end_in": 30.0, "sim_n_in": 1500,
+    "pid_kp_in": 2.0, "pid_ki_in": 1.0, "pid_kd_in": 0.2, "pid_N_in": 10.0,
+    "tf_num_in": "1", "tf_den_in": "1, 1",
+}
+
+# 处理上一轮遗留的请求（必须早于控件创建）
+_pending_restore = st.session_state.pop("_do_restore", False)
+_pending_pid = st.session_state.pop("_pending_pid", None)
+
+for _k, _v in _DRAFT_DEFAULTS.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
+# 「撤销改动」：把已应用参数写回草稿控件
+if _pending_restore and st.session_state.get("_applied"):
+    _ap0 = st.session_state["_applied"]
+    st.session_state["model_key_in"] = _ap0["model_key"]
+    _k0 = MODEL_SPECS[_ap0["model_key"]]["kind"]
+    for _pk, _pv in (_ap0.get("pvals") or {}).items():
+        st.session_state[f"mp_{_k0}_{_pk}_in"] = _pv
+    st.session_state["plant_delay_in"] = _ap0["delay"]
+    st.session_state["sim_t_end_in"] = _ap0["t_end"]
+    st.session_state["sim_n_in"] = _ap0["n"]
+    st.session_state["pid_kp_in"] = _ap0["kp"]
+    st.session_state["pid_ki_in"] = _ap0["ki"]
+    st.session_state["pid_kd_in"] = _ap0["kd"]
+    st.session_state["pid_N_in"] = _ap0["N"]
+    if _ap0.get("tf_num_in") is not None:
+        st.session_state["tf_num_in"] = _ap0["tf_num_in"]
+        st.session_state["tf_den_in"] = _ap0["tf_den_in"]
+
+# 「应用到全局 PID」（来自整定页/参数扫描页的按钮）：写入草稿并立即生效
+_auto_apply = False
+if _pending_pid is not None:
+    st.session_state["pid_kp_in"] = float(_pending_pid[0])
+    st.session_state["pid_ki_in"] = float(_pending_pid[1])
+    st.session_state["pid_kd_in"] = float(_pending_pid[2])
+    _auto_apply = True
 
 
 with st.sidebar:
@@ -362,71 +400,148 @@ with st.sidebar:
     st.divider()
 
     with st.expander("🏭 被控对象模型", expanded=True):
-        preset_name = st.selectbox("快速预设", list(PRESETS.keys()), index=0)
+        preset_name = st.selectbox("快速预设", list(PRESETS.keys()), index=0, key="preset_sel")
         if st.session_state.get("_last_preset") != preset_name:
             st.session_state["_last_preset"] = preset_name
             apply_preset(preset_name)
 
-        model_key = st.selectbox("对象模型库", list(MODEL_SPECS.keys()), key="model_key")
-        spec = MODEL_SPECS[model_key]
-        st.caption(f"G(s) = {spec['formula']}")
+        model_key_in = st.selectbox("对象模型库", list(MODEL_SPECS.keys()), key="model_key_in")
+        spec_in = MODEL_SPECS[model_key_in]
+        st.caption(f"G(s) = {spec_in['formula']}")
 
-        pvals, custom_num, custom_den = {}, None, None
-        if spec["kind"] == "custom":
-            num_txt = st.text_input("分子系数 num（降幂，逗号分隔）", key="tf_num")
-            den_txt = st.text_input("分母系数 den（降幂，逗号分隔）", key="tf_den")
+        pvals_in, custom_num_in, custom_den_in = {}, None, None
+        tf_num_in = tf_den_in = None
+        if spec_in["kind"] == "custom":
+            tf_num_in = st.text_input("分子系数 num（降幂，逗号分隔）", key="tf_num_in")
+            tf_den_in = st.text_input("分母系数 den（降幂，逗号分隔）", key="tf_den_in")
             try:
-                custom_num = parse_coeffs(num_txt)
-                custom_den = parse_coeffs(den_txt)
-                if custom_num.size > custom_den.size:
+                custom_num_in = parse_coeffs(tf_num_in)
+                custom_den_in = parse_coeffs(tf_den_in)
+                if custom_num_in.size > custom_den_in.size:
                     st.error("分子阶次不能高于分母（非真传递函数），请检查系数个数。")
-                    custom_num = custom_den = None
+                    custom_num_in = custom_den_in = None
                 else:
-                    st.caption(f"读入 → num = {list(custom_num)}，den = {list(custom_den)}")
+                    st.caption(f"读入 → num = {list(custom_num_in)}，den = {list(custom_den_in)}")
             except ValueError as exc:
                 st.error(f"系数解析失败：{exc}")
         else:
-            for (pk, plabel, pdef, pmin, pmax, pstep) in spec["params"]:
-                sk = f"mp_{spec['kind']}_{pk}"
+            for (pk, plabel, pdef, pmin, pmax, pstep) in spec_in["params"]:
+                sk = f"mp_{spec_in['kind']}_{pk}_in"
                 if sk not in st.session_state:
                     st.session_state[sk] = pdef
-                pvals[pk] = st.number_input(plabel, key=sk, min_value=pmin, max_value=pmax,
-                                            step=pstep, format="%.4f")
+                pvals_in[pk] = st.number_input(plabel, key=sk, min_value=pmin, max_value=pmax,
+                                               step=pstep, format="%.4f")
 
-        delay = st.number_input("纯滞后 τ (s)", key="plant_delay", min_value=0.0, max_value=10.0,
-                                step=0.05, format="%.3f")
-        st.caption(f"ℹ️ {spec['note']}")
-
-    if spec["kind"] == "custom" and (custom_num is None or custom_den is None):
-        plant = st.session_state.get("_plant") or SecondOrderPlant()
-        st.sidebar.warning("自定义系数无效，当前沿用上一次的有效对象。")
-    else:
-        try:
-            plant = build_plant(model_key, pvals, delay=delay, num=custom_num, den=custom_den)
-            st.session_state["_plant"] = plant
-        except Exception as exc:      # pragma: no cover
-            plant = st.session_state.get("_plant") or SecondOrderPlant()
-            st.sidebar.error(f"对象构造失败：{exc}；沿用上一次的有效对象。")
-
-    so = plant.second_order_params()
-    th = second_order_theory(so[2], so[1]) if so else None   # 仅标准二阶对象有解析公式
+        delay_in = st.number_input("纯滞后 τ (s)", key="plant_delay_in", min_value=0.0,
+                                   max_value=10.0, step=0.05, format="%.3f")
+        st.caption(f"ℹ️ {spec_in['note']}")
 
     with st.expander("⚙️ 仿真设置", expanded=True):
-        st.number_input("仿真时长 (s)", key="sim_t_end", min_value=1.0, max_value=600.0, step=1.0)
-        st.select_slider("采样点数", key="sim_n", options=[1000, 1500, 2000, 3000, 4000, 6000, 8000])
-        st.caption(f"步长 dt ≈ {st.session_state['sim_t_end'] / st.session_state['sim_n'] * 1000:.2f} ms")
+        t_end_in = st.number_input("仿真时长 (s)", key="sim_t_end_in", min_value=1.0,
+                                   max_value=600.0, step=1.0)
+        n_in = st.select_slider("采样点数", key="sim_n_in",
+                                options=[1000, 1500, 2000, 3000, 4000, 6000, 8000])
+        st.caption(f"步长 dt ≈ {float(t_end_in) / int(n_in) * 1000:.2f} ms")
 
     with st.expander("🎯 全局 PID 参数", expanded=True):
-        kp = st.number_input("比例增益 Kp", key="pid_kp", min_value=0.0, max_value=1000.0, step=0.1, format="%.4f")
-        ki = st.number_input("积分增益 Ki", key="pid_ki", min_value=0.0, max_value=1000.0, step=0.1, format="%.4f")
-        kd = st.number_input("微分增益 Kd", key="pid_kd", min_value=0.0, max_value=500.0, step=0.05, format="%.4f")
-        st.number_input("微分滤波系数 N", key="pid_N", min_value=1.0, max_value=200.0, step=1.0,
-                        help="微分项一阶滤波 Tf = Td/N，N 越大越接近理想微分")
+        kp_in = st.number_input("比例增益 Kp", key="pid_kp_in", min_value=0.0,
+                                max_value=1000.0, step=0.1, format="%.4f")
+        ki_in = st.number_input("积分增益 Ki", key="pid_ki_in", min_value=0.0,
+                                max_value=1000.0, step=0.1, format="%.4f")
+        kd_in = st.number_input("微分增益 Kd", key="pid_kd_in", min_value=0.0,
+                                max_value=500.0, step=0.05, format="%.4f")
+        N_in = st.number_input("微分滤波系数 N", key="pid_N_in", min_value=1.0,
+                               max_value=200.0, step=1.0,
+                               help="微分项一阶滤波 Tf = Td/N，N 越大越接近理想微分")
         if st.button("↩️ 恢复默认 PID 参数", use_container_width=True):
             st.session_state["_pending_pid"] = (2.0, 1.0, 0.2)
             st.rerun()
 
-    with st.expander("📋 当前对象摘要", expanded=False):
+    # ---------------- 运行控制 ----------------
+    st.divider()
+    st.markdown("### 🚀 运行控制")
+    _status_slot = st.empty()
+
+    # 当前草稿的指纹
+    _draft_sig = (
+        str(model_key_in),
+        tuple(sorted(pvals_in.items())) if pvals_in else None,
+        None if custom_num_in is None else tuple(np.round(custom_num_in, 10)),
+        None if custom_den_in is None else tuple(np.round(custom_den_in, 10)),
+        round(float(delay_in), 6),
+        float(t_end_in), int(n_in),
+        round(float(kp_in), 6), round(float(ki_in), 6), round(float(kd_in), 6),
+        round(float(N_in), 6),
+    )
+    _applied = st.session_state.get("_applied")
+    _dirty = (_applied is None) or (st.session_state.get("_applied_sig") != _draft_sig)
+
+    _bc1, _bc2 = st.columns([1.5, 1])
+    _btn_run = _bc1.button("▶ 开始运行", type="primary", use_container_width=True,
+                           help="把当前参数应用到全部功能页并重新计算")
+    _btn_undo = _bc2.button("↺ 撤销改动", use_container_width=True, disabled=not _dirty,
+                            help="参数恢复到上一次运行时使用的值")
+
+    if _btn_undo:
+        st.session_state["_do_restore"] = True
+        st.rerun()
+
+    _apply_now = bool(_btn_run) or _auto_apply or (_applied is None)
+    if _apply_now:
+        _ok = True
+        if spec_in["kind"] == "custom" and (custom_num_in is None or custom_den_in is None):
+            _new_plant = None
+            _ok = False
+            _status_slot.error("自定义系数无效，参数未应用。请修正后重试。")
+        else:
+            try:
+                _new_plant = build_plant(model_key_in, pvals_in, delay=delay_in,
+                                         num=custom_num_in, den=custom_den_in)
+            except Exception as exc:
+                _new_plant = None
+                _ok = False
+                _status_slot.error(f"对象构造失败：{exc}；参数未应用。")
+
+        if _ok and _new_plant is not None:
+            st.session_state["_applied"] = {
+                "model_key": str(model_key_in), "pvals": dict(pvals_in),
+                "delay": float(delay_in), "t_end": float(t_end_in), "n": int(n_in),
+                "kp": float(kp_in), "ki": float(ki_in), "kd": float(kd_in),
+                "N": float(N_in), "tf_num_in": tf_num_in, "tf_den_in": tf_den_in,
+            }
+            st.session_state["_applied_sig"] = _draft_sig
+            # 这三个键被各功能页直接读取
+            st.session_state["sim_t_end"] = float(t_end_in)
+            st.session_state["sim_n"] = int(n_in)
+            st.session_state["pid_N"] = float(N_in)
+            st.session_state["_plant"] = _new_plant
+            _applied = st.session_state["_applied"]
+            _dirty = False
+
+    if _applied is None:
+        _status_slot.error("⚠️ 参数尚未应用，请点「▶ 开始运行」")
+    elif _dirty:
+        _status_slot.warning("⚠️ **参数已修改**，点「▶ 开始运行」后生效")
+    else:
+        _status_slot.success("✅ 参数已应用")
+
+    # ---------------- 已被应用的参数（供各功能页使用）----------------
+    _ap = st.session_state.get("_applied")
+    if _ap is None:      # 理论上不会发生（首次会自动应用）
+        plant = SecondOrderPlant()
+        kp, ki, kd, N_used = 2.0, 1.0, 0.2, 10.0
+    else:
+        plant = st.session_state.get("_plant") or SecondOrderPlant(
+            _ap["pvals"].get("K", 1.0), _ap["pvals"].get("wn", 1.0),
+            _ap["pvals"].get("zeta", 0.5), _ap["delay"])
+        kp, ki, kd = _ap["kp"], _ap["ki"], _ap["kd"]
+        N_used = _ap["N"]
+    st.session_state["_plant"] = plant
+
+    so = plant.second_order_params()
+    th = second_order_theory(so[2], so[1]) if so else None
+
+    with st.expander("📋 当前对象摘要（已应用）", expanded=False):
         st.code(plant.describe(), language="text")
         st.write(f"**阶次**：{plant.order} 阶　　**稳定性**：{plant.stability_label()}")
         st.write(f"**极点**：{np.round(plant.poles(), 4).tolist()}")
